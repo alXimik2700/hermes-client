@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Circle background -->
+    <path
+        android:fillColor="#16213E"
+        android:pathData="M54,54m-40,0a40,40 0,1 1,80 0a40,40 0,1 1,-80 0" />
+    <!-- A letter -->
+    <path
+        android:fillColor="#E0E0FF"
+        android:pathData="M38,68L38,40L50,58L62,40L62,68L58,68L58,46L48,62L44,62L34,46L34,68Z" />
+    <!-- Lizard tail -->
+    <path
+        android:fillColor="#533483"
+        android:pathData="M70,35Q76,28 82,30Q86,32 84,38Q82,42 74,38Z" />
+</vector>

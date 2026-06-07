@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Aigena v2 UI</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{display:flex;justify-content:center;align-items:center;min-height:100vh;background:#0f0f23;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
+.phone{width:390px;height:844px;background:#1A1A2E;border-radius:40px;overflow:hidden;display:flex;flex-direction:column;border:3px solid #333;position:relative}
+.screen{flex:1;overflow:hidden;display:flex;flex-direction:column}
+
+/* CHAT SCREEN */
+.header{background:#16213E;padding:12px 16px;display:flex;align-items:center;box-shadow:0 4px 12px rgba(0,0,0,.3)}
+.avatar{width:40px;height:40px;border-radius:50%;background:#0F3460;display:flex;align-items:center;justify-content:center;font-size:18px;font-weight:700;color:#E8E8E8}
+.header .info{margin-left:12px;flex:1}
+.header .title{color:#E8E8E8;font-size:18px;font-weight:700}
+.header .status{display:flex;align-items:center;gap:4px;margin-top:2px}
+.header .dot{width:6px;height:6px;border-radius:50%;background:#4CAF50}
+.header .status-text{color:#A0A0B0;font-size:11px}
+.messages{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px}
+.msg-row{display:flex;width:100%}
+.msg-row.user{justify-content:flex-end}
+.msg-row.ai{justify-content:flex-start}
+.bubble{max-width:280px;padding:12px;border-radius:16px;position:relative}
+.msg-row.user .bubble{background:#533483;border-bottom-right-radius:4px}
+.msg-row.ai .bubble{background:#1F4068;border-bottom-left-radius:4px}
+.bubble .text{color:#E8E8E8;font-size:15px;line-height:1.35}
+.bubble .time{color:#A0A0B0;font-size:10px;margin-top:4px}
+.input-bar{background:#1C2541;padding:8px 12px;display:flex;align-items:center;gap:8px;box-shadow:0 -4px 12px rgba(0,0,0,.2)}
+.input-bar input{flex:1;background:#16213E;border:1px solid #3A3A5A;border-radius:20px;padding:10px 16px;color:#E8E8E8;font-size:14px;outline:none}
+.input-bar input::placeholder{color:#A0A0B0}
+.input-bar input:focus{border-color:#3A7BD5}
+.send-btn{width:40px;height:40px;border-radius:50%;background:#3A7BD5;border:none;display:flex;align-items:center;justify-content:center;cursor:pointer}
+.send-btn svg{width:20px;height:20px;fill:#fff}
+
+/* BOTTOM NAV */
+.bottom-nav{background:#16213E;display:flex;justify-content:space-around;padding:8px 0 12px}
+.nav-item{display:flex;flex-direction:column;align-items:center;gap:2px;cursor:pointer;padding:4px 16px;border-radius:16px;transition:.2s}
+.nav-item.active{background:#1C2541}
+.nav-item .nav-icon{font-size:22px}
+.nav-item .nav-label{font-size:10px;color:#A0A0B0}
+.nav-item.active .nav-label{color:#3A7BD5}
+.nav-item.active .nav-icon{color:#3A7BD5}
+
+/* PROFILE SCREEN */
+.profile-header{background:#16213E;padding:24px;display:flex;flex-direction:column;align-items:center}
+.profile-avatar{width:96px;height:96px;border-radius:50%;background:#0F3460;display:flex;align-items:center;justify-content:center;font-size:40px;font-weight:700;color:#E8E8E8}
+.profile-name{color:#E8E8E8;font-size:22px;font-weight:700;margin-top:12px}
+.profile-role{color:#A0A0B0;font-size:14px;margin-top:2px}
+.profile-bio{color:#A0A0B0;font-size:13px;margin-top:8px}
+.tab-bar{background:#16213E;display:flex;overflow-x:auto;padding:0 12px;gap:0}
+.tab{padding:12px 16px;font-size:13px;color:#A0A0B0;cursor:pointer;border-bottom:2px solid transparent;white-space:nowrap}
+.tab.active{color:#3A7BD5;border-bottom-color:#3A7BD5}
+.empty-state{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px}
+.empty-icon{font-size:48px;opacity:0.3;color:#A0A0B0}
+.empty-text{color:#A0A0B0;font-size:14px}
+
+/* SETTINGS SCREEN */
+.settings-header{background:#16213E;padding:16px;display:flex;align-items:center;gap:12px;box-shadow:0 4px 12px rgba(0,0,0,.3)}
+.settings-header .icon{font-size:24px;color:#3A7BD5}
+.settings-title{color:#E8E8E8;font-size:20px;font-weight:700}
+.settings-body{flex:1;overflow-y:auto;padding:8px 0}
+.section-header{color:#3A7BD5;font-size:12px;font-weight:700;padding:12px 16px 4px}
+.setting-card{background:#16213E;margin:4px 16px;border-radius:12px;padding:16px}
+.setting-card label{color:#A0A0B0;font-size:12px;display:block;margin-bottom:4px}
+.setting-card input{width:100%;background:#1C2541;border:1px solid #3A3A5A;border-radius:8px;padding:10px;color:#E8E8E8;font-size:14px;outline:none}
+.setting-card input:focus{border-color:#3A7BD5}
+.setting-row{display:flex;justify-content:space-between;align-items:center;padding:4px 0}
+.setting-row .row-label{color:#E8E8E8;font-size:14px}
+.setting-row .row-value{color:#3A7BD5;font-size:14px;font-weight:700}
+.dropdown{background:#1C2541;border-radius:8px;padding:12px;display:flex;justify-content:space-between;align-items:center;color:#E8E8E8;font-size:14px;cursor:pointer;margin-top:8px}
+.dropdown .arrow{color:#A0A0B0}
+.slider-row{display:flex;justify-content:space-between;align-items:center;margin:8px 0}
+.slider-labels{display:flex;justify-content:space-between;margin-top:4px}
+.slider-labels span{color:#A0A0B0;font-size:10px}
+.divider{height:1px;background:#2A2A4A;margin:8px 0}
+
+.screen-switcher{display:flex;gap:8px;justify-content:center;padding:8px}
+.switch-btn{background:#16213E;border:none;color:#A0A0B0;padding:6px 14px;border-radius:16px;font-size:12px;cursor:pointer}
+.switch-btn.active{background:#3A7BD5;color:#fff}
+</style></head>
+<body>
+<div class="phone">
+  <div class="screen-switcher" style="position:absolute;top:8px;z-index:10;width:100%">
+    <button class="switch-btn active" onclick="show('chat')">Chat</button>
+    <button class="switch-btn" onclick="show('profile')">Profile</button>
+    <button class="switch-btn" onclick="show('settings')">Settings</button>
+  </div>
+
+  <!-- CHAT SCREEN -->
+  <div class="screen" id="chat" style="display:flex">
+    <div class="header">
+      <div class="avatar">A</div>
+      <div class="info">
+        <div class="title">Aigena</div>
+        <div class="status"><div class="dot"></div><span class="status-text">Online</span></div>
+      </div>
+    </div>
+    <div class="messages">
+      <div class="msg-row user"><div class="bubble"><div class="text">Hello Aigena!</div><div class="time">10:24</div></div></div>
+      <div class="msg-row ai"><div class="bubble"><div class="text">Hey there! How can I help?</div><div class="time">10:24</div></div></div>
+      <div class="msg-row user"><div class="bubble"><div class="text">Can you check something?</div><div class="time">10:25</div></div></div>
+      <div class="msg-row ai"><div class="bubble"><div class="text">Sure! What do you need?</div><div class="time">10:25</div></div></div>
+      <div style="display:flex;align-items:center;gap:8px;padding:4px 12px">
+        <span style="color:#A0A0B0;font-size:12px">Aigena is typing</span>
+        <div style="display:flex;gap:3px"><span style="width:5px;height:5px;border-radius:50%;background:#A0A0B0;animation:bounce 1.4s infinite .32s"></span><span style="width:5px;height:5px;border-radius:50%;background:#A0A0B0;animation:bounce 1.4s infinite .16s"></span></div>
+      </div>
+    </div>
+    <div class="input-bar">
+      <input type="text" placeholder="Type a message..." value="Sounds good!">
+      <button class="send-btn"><svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg></button>
+    </div>
+    <div class="bottom-nav">
+      <div class="nav-item active"><span class="nav-icon">💬</span><span class="nav-label">Chat</span></div>
+      <div class="nav-item"><span class="nav-icon">👤</span><span class="nav-label">Profile</span></div>
+      <div class="nav-item"><span class="nav-icon">⚙</span><span class="nav-label">Settings</span></div>
+    </div>
+  </div>
+
+  <!-- PROFILE SCREEN -->
+  <div class="screen" id="profile" style="display:none">
+    <div class="profile-header">
+      <div class="profile-avatar">A</div>
+      <div class="profile-name">Aigena</div>
+      <div class="profile-role">AI Assistant</div>
+      <div class="profile-bio">Always here to help</div>
+    </div>
+    <div class="tab-bar">
+      <div class="tab active">Photos</div><div class="tab">Videos</div><div class="tab">Files</div><div class="tab">Links</div><div class="tab">Voice</div>
+    </div>
+    <div class="empty-state">
+      <div class="empty-icon">🖼</div>
+      <div class="empty-text">No photos shared yet</div>
+    </div>
+    <div class="bottom-nav">
+      <div class="nav-item"><span class="nav-icon">💬</span><span class="nav-label">Chat</span></div>
+      <div class="nav-item active"><span class="nav-icon">👤</span><span class="nav-label">Profile</span></div>
+      <div class="nav-item"><span class="nav-icon">⚙</span><span class="nav-label">Settings</span></div>
+    </div>
+  </div>
+
+  <!-- SETTINGS SCREEN -->
+  <div class="screen" id="settings" style="display:none">
+    <div class="settings-header">
+      <div class="icon">⚙</div>
+      <div class="settings-title">Settings</div>
+    </div>
+    <div class="settings-body">
+      <div class="section-header">SERVER CONNECTION</div>
+      <div class="setting-card">
+        <label>Server URL</label>
+        <input value="http://100.79.49.28:5000" type="text">
+      </div>
+      <div class="setting-card">
+        <label>Connection mode</label>
+        <div class="dropdown">HTTP polling (default) <span class="arrow">v</span></div>
+      </div>
+      <div class="section-header">POLLING</div>
+      <div class="setting-card">
+        <div class="setting-row">
+          <span class="row-label">Poll interval (ms)</span>
+          <span class="row-value">2000ms</span>
+        </div>
+        <input type="range" min="500" max="10000" value="2000" style="width:100%;margin-top:8px;accent-color:#3A7BD5">
+        <div class="slider-labels"><span>Fast</span><span>Slow</span></div>
+      </div>
+      <div class="section-header">ABOUT</div>
+      <div class="setting-card">
+        <div class="setting-row"><span class="row-label">Version</span><span class="row-value">1.0.0-alpha</span></div>
+        <div class="divider"></div>
+        <div class="setting-row"><span class="row-label">Build</span><span class="row-value">debug</span></div>
+        <div class="divider"></div>
+        <div class="setting-row"><span class="row-label">Min SDK</span><span class="row-value">26 (Android 8.0)</span></div>
+      </div>
+    </div>
+    <div class="bottom-nav">
+      <div class="nav-item"><span class="nav-icon">💬</span><span class="nav-label">Chat</span></div>
+      <div class="nav-item"><span class="nav-icon">👤</span><span class="nav-label">Profile</span></div>
+      <div class="nav-item active"><span class="nav-icon">⚙</span><span class="nav-label">Settings</span></div>
+    </div>
+  </div>
+</div>
+
+<script>
+function show(screen){document.querySelectorAll('.screen').forEach(s=>s.style.display='none');document.getElementById(screen).style.display='flex';document.querySelectorAll('.switch-btn').forEach(b=>b.classList.remove('active'));event.target.classList.add('active')}
+</script>
+</body>
+</html>
