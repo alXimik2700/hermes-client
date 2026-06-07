@@ -3,6 +3,9 @@ package com.aigena.messenger
 import android.app.*
 import android.content.Context
 import android.content.Intent
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
@@ -18,39 +21,116 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.util.concurrent.TimeUnit
+import javax.net.SocketFactory
+import java.net.InetAddress
+import java.net.Socket
 import kotlin.time.Duration.Companion.seconds
 
 class HermesSyncService : Service() {
 
     private lateinit var repo: HermesRepository
+    private lateinit var connectivityManager: ConnectivityManager
+    @Volatile private var activeNetwork: Network? = null
+    @Volatile private var isNetworkAvailable: Boolean = false
 
-    // MAX PERFORMANCE OkHttp client — text messages + long-poll
-    private val client = okhttp3.OkHttpClient.Builder()
-        .callTimeout(AppConfig.CALL_TIMEOUT_SEC, java.util.concurrent.TimeUnit.SECONDS)
-        .connectTimeout(AppConfig.CONNECT_TIMEOUT_SEC, java.util.concurrent.TimeUnit.SECONDS)
-        .readTimeout(AppConfig.READ_TIMEOUT_SEC, java.util.concurrent.TimeUnit.SECONDS)
-        .writeTimeout(AppConfig.WRITE_TIMEOUT_SEC, java.util.concurrent.TimeUnit.SECONDS)
-        .connectionPool(ConnectionPool(
-            AppConfig.MAX_IDLE_CONNECTIONS,
-            AppConfig.KEEP_ALIVE_MINUTES,
-            java.util.concurrent.TimeUnit.MINUTES
-        ))
-        .protocols(listOf(Protocol.HTTP_1_1))
-        .build()
+    // Wake-up channel: signaled on network available to interrupt backoff sleep
+    private val networkWakeChannel = kotlinx.coroutines.channels.Channel<Unit>(kotlinx.coroutines.channels.Channel.CONFLATED)
 
-    // MEDIA OkHttp client — separate pool, longer timeouts for large files
-    private val mediaClient = okhttp3.OkHttpClient.Builder()
-        .callTimeout(AppConfig.MEDIA_CALL_TIMEOUT_SEC, TimeUnit.SECONDS)
-        .connectTimeout(AppConfig.MEDIA_CONNECT_TIMEOUT_SEC, TimeUnit.SECONDS)
-        .readTimeout(AppConfig.MEDIA_READ_TIMEOUT_SEC, TimeUnit.SECONDS)
-        .writeTimeout(AppConfig.MEDIA_WRITE_TIMEOUT_SEC, TimeUnit.SECONDS)
-        .connectionPool(ConnectionPool(
-            AppConfig.MEDIA_MAX_IDLE_CONNECTIONS,
-            AppConfig.MEDIA_KEEP_ALIVE_MINUTES,
-            TimeUnit.MINUTES
-        ))
-        .protocols(listOf(Protocol.HTTP_1_1))
-        .build()
+    // MAX PERFORMANCE OkHttp client — text messages + long-poll (rebuild on network change)
+    @Volatile private var client: OkHttpClient = buildClient(null)
+    // MEDIA OkHttp client — separate pool, longer timeouts (rebuild on network change)
+    @Volatile private var mediaClient: OkHttpClient = buildMediaClient(null)
+
+    /** Wrap android.net.Network SocketFactory (java.net) -> javax.net.SocketFactory for OkHttp. */
+    private fun javaxSocketFactory(network: Network): SocketFactory {
+        val base = network.socketFactory
+        return object : SocketFactory() {
+            override fun createSocket(): Socket = base.createSocket()
+            override fun createSocket(host: String, port: Int): Socket = base.createSocket(host, port)
+            override fun createSocket(host: String, port: Int, localHost: InetAddress, localPort: Int): Socket =
+                base.createSocket(host, port, localHost, localPort)
+            override fun createSocket(host: InetAddress, port: Int): Socket = base.createSocket(host, port)
+            override fun createSocket(address: InetAddress, port: Int, localAddress: InetAddress, localPort: Int): Socket =
+                base.createSocket(address, port, localAddress, localPort)
+        }
+    }
+
+    private fun buildClient(network: Network?): OkHttpClient {
+        val builder = okhttp3.OkHttpClient.Builder()
+            .callTimeout(AppConfig.CALL_TIMEOUT_SEC, java.util.concurrent.TimeUnit.SECONDS)
+            .connectTimeout(AppConfig.CONNECT_TIMEOUT_SEC, java.util.concurrent.TimeUnit.SECONDS)
+            .readTimeout(AppConfig.READ_TIMEOUT_SEC, java.util.concurrent.TimeUnit.SECONDS)
+            .writeTimeout(AppConfig.WRITE_TIMEOUT_SEC, java.util.concurrent.TimeUnit.SECONDS)
+            .connectionPool(ConnectionPool(
+                AppConfig.MAX_IDLE_CONNECTIONS,
+                AppConfig.KEEP_ALIVE_MINUTES,
+                java.util.concurrent.TimeUnit.MINUTES
+            ))
+            .protocols(listOf(Protocol.HTTP_1_1))
+        if (network != null) {
+            builder.socketFactory(javaxSocketFactory(network))
+        }
+        return builder.build()
+    }
+
+    private fun buildMediaClient(network: Network?): OkHttpClient {
+        val builder = okhttp3.OkHttpClient.Builder()
+            .callTimeout(AppConfig.MEDIA_CALL_TIMEOUT_SEC, TimeUnit.SECONDS)
+            .connectTimeout(AppConfig.MEDIA_CONNECT_TIMEOUT_SEC, TimeUnit.SECONDS)
+            .readTimeout(AppConfig.MEDIA_READ_TIMEOUT_SEC, TimeUnit.SECONDS)
+            .writeTimeout(AppConfig.MEDIA_WRITE_TIMEOUT_SEC, TimeUnit.SECONDS)
+            .connectionPool(ConnectionPool(
+                AppConfig.MEDIA_MAX_IDLE_CONNECTIONS,
+                AppConfig.MEDIA_KEEP_ALIVE_MINUTES,
+                TimeUnit.MINUTES
+            ))
+            .protocols(listOf(Protocol.HTTP_1_1))
+        if (network != null) {
+            builder.socketFactory(javaxSocketFactory(network))
+        }
+        return builder.build()
+    }
+
+    /** Switch clients to new network — evicts all stale connections from old network. */
+    private fun switchToNetwork(network: Network?) {
+        // Evict old connections first
+        client.connectionPool.evictAll()
+        mediaClient.connectionPool.evictAll()
+        // Rebuild with new socket factory
+        client = buildClient(network)
+        mediaClient = buildMediaClient(network)
+        activeNetwork = network
+        isNetworkAvailable = network != null
+        // Wake sync loop
+        networkWakeChannel.trySend(Unit)
+        android.util.Log.e("HermesSync", "Switched to network: $network, available=$isNetworkAvailable")
+    }
+
+    private val networkCallback = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(network: Network) {
+            android.util.Log.e("HermesSync", "Network available: $network")
+            switchToNetwork(network)
+        }
+
+        override fun onLost(network: Network) {
+            android.util.Log.e("HermesSync", "Network lost: $network")
+            if (activeNetwork == network) {
+                isNetworkAvailable = false
+                client.connectionPool.evictAll()
+                mediaClient.connectionPool.evictAll()
+                android.util.Log.e("HermesSync", "Active network lost, pools evicted")
+            }
+        }
+
+        override fun onCapabilitiesChanged(network: Network, caps: NetworkCapabilities) {
+            val hasInternet = caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            android.util.Log.e("HermesSync", "Caps changed: $network internet=$hasInternet")
+            if (hasInternet && network == activeNetwork) {
+                isNetworkAvailable = true
+                networkWakeChannel.trySend(Unit)
+            }
+        }
+    }
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val jsonMediaType = "application/json; charset=utf-8".toMediaType()
@@ -61,7 +141,9 @@ class HermesSyncService : Service() {
         lastMessageId = getSharedPreferences("hermes_sync", MODE_PRIVATE).getLong("last_id", 0)
         val db = AppDatabase.getInstance(this)
         repo = HermesRepository(db.messageDao())
-        android.util.Log.e("HermesSync", "Service created [MAX PERF + MEDIA], lastId=$lastMessageId")
+        connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        connectivityManager.registerDefaultNetworkCallback(networkCallback)
+        android.util.Log.e("HermesSync", "Service created [NETWORK-AWARE], lastId=$lastMessageId")
         startForeground()
     }
 
@@ -75,7 +157,7 @@ class HermesSyncService : Service() {
     @Volatile private var syncRunning = false
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        android.util.Log.e("HermesSync", "Starting sync loop [MAX PERF + MEDIA]")
+        android.util.Log.e("HermesSync", "Starting sync loop [NETWORK-AWARE]")
         if (!syncRunning) {
             syncRunning = true
             scope.launch { syncLoop() }
@@ -122,7 +204,18 @@ class HermesSyncService : Service() {
                 android.util.Log.e("HermesSync", "Sync error: ${e.message}", e)
                 backoffIndex = (backoffIndex + 1).coerceAtMost(AppConfig.BACKOFF_SEQUENCE.size - 1)
             }
-            delay(AppConfig.BACKOFF_SEQUENCE[backoffIndex])
+            // Network-aware backoff: wake immediately if network becomes available
+            val backoffMs = AppConfig.BACKOFF_SEQUENCE[backoffIndex]
+            try {
+                withTimeout(backoffMs) {
+                    networkWakeChannel.receive()  // blocks until network event
+                }
+                // Network came back — reset backoff, retry immediately
+                android.util.Log.e("HermesSync", "Woke by network event, resetting backoff")
+                backoffIndex = 0
+            } catch (_: kotlinx.coroutines.TimeoutCancellationException) {
+                // Normal timeout — backoff completed, continue loop
+            }
         }
     }
 
@@ -298,6 +391,9 @@ class HermesSyncService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        connectivityManager.unregisterNetworkCallback(networkCallback)
+        client.connectionPool.evictAll()
+        mediaClient.connectionPool.evictAll()
         scope.cancel()
         super.onDestroy()
     }

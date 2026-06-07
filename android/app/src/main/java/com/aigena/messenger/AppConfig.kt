@@ -3,7 +3,7 @@ package com.aigena.messenger
 object AppConfig {
     const val BASE_URL = "http://YOUR_SERVER_IP:5001/"
     const val REMOTE_URL = "https://YOUR_FUNNEL_URL/"
-    const val API_TOKEN=""YOUR_API_TOKEN_HERE""
+    const val API_TOKEN = "YOUR_API_TOKEN_HERE"
     @Volatile var currentServerUrl: String = BASE_URL
 
     fun initFromPrefs(ctx: android.content.Context) {
