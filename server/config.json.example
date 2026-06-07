@@ -1,0 +1,12 @@
+{
+  "deepseek_api_key": "YOUR_DEEPSEEK_API_KEY",
+  "deepseek_model": "deepseek-chat",
+  "deepseek_base": "https://api.deepseek.com",
+  "hermes_api_url": "http://127.0.0.1:8642",
+  "hermes_api_key": "YOUR_HERMES_API_KEY",
+  "hermes_session_id": "YOUR_SESSION_ID",
+  "api_token": "YOUR_API_TOKEN",
+  "listen_host": "0.0.0.0",
+  "listen_port": 5001,
+  "database": "messages.db"
+}

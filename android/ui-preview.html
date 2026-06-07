@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Aigena Messenger UI</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{display:flex;justify-content:center;align-items:center;min-height:100vh;background:#0f0f23;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif}
+.phone{width:390px;height:844px;background:#1A1A2E;border-radius:40px;overflow:hidden;display:flex;flex-direction:column;border:3px solid #333;position:relative}
+.header{background:#16213E;padding:12px 16px;display:flex;align-items:center;box-shadow:0 4px 12px rgba(0,0,0,.3)}
+.header .title{color:#E8E8E8;font-size:20px;font-weight:700}
+.header .status-dot{width:8px;height:8px;border-radius:50%;background:#4CAF50;margin-left:auto;margin-right:6px}
+.header .status-text{color:#A0A0B0;font-size:12px;margin-left:auto}
+.messages{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px}
+.msg-row{display:flex;width:100%}
+.msg-row.user{justify-content:flex-end}
+.msg-row.ai{justify-content:flex-start}
+.bubble{max-width:280px;padding:12px;border-radius:16px;position:relative}
+.msg-row.user .bubble{background:#533483;border-bottom-right-radius:4px}
+.msg-row.ai .bubble{background:#1F4068;border-bottom-left-radius:4px}
+.bubble .text{color:#E8E8E8;font-size:15px;line-height:1.35}
+.bubble .time{color:#A0A0B0;font-size:10px;margin-top:4px}
+.empty-state{display:flex;align-items:center;justify-content:center;height:100%;color:#A0A0B0;font-size:14px}
+.typing{display:flex;align-items:center;gap:8px;padding:4px 12px}
+.typing .label{color:#A0A0B0;font-size:12px}
+.typing .dots{display:flex;gap:3px}
+.typing .dots span{width:5px;height:5px;border-radius:50%;background:#A0A0B0;animation:bounce 1.4s infinite ease-in-out both}
+.typing .dots span:nth-child(1){animation-delay:-.32s}
+.typing .dots span:nth-child(2){animation-delay:-.16s}
+@keyframes bounce{0%,80%,100%{transform:scale(0)}40%{transform:scale(1)}}
+.input-bar{background:#16213E;padding:8px 12px;display:flex;align-items:center;gap:8px}
+.input-bar input{flex:1;background:transparent;border:1px solid #3A3A5A;border-radius:20px;padding:10px 16px;color:#E8E8E8;font-size:14px;outline:none}
+.input-bar input::placeholder{color:#A0A0B0}
+.input-bar input:focus{border-color:#0F3460}
+.send-btn{width:40px;height:40px;border-radius:50%;background:#0F3460;border:none;color:#fff;font-size:20px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.nav-bar{height:34px;background:#16213E;display:flex;justify-content:center;align-items:center}
+.nav-bar .pill{width:120px;height:5px;background:#444;border-radius:3px}
+</style></head>
+<body>
+<div class="phone">
+  <div class="header">
+    <span class="title">Aigena</span>
+    <div class="status-dot"></div>
+    <span class="status-text">Online</span>
+  </div>
+  <div class="messages">
+    <div class="msg-row user">
+      <div class="bubble">
+        <div class="text">Hello Aigena! How are you?</div>
+        <div class="time">10:24 AM</div>
+      </div>
+    </div>
+    <div class="msg-row ai">
+      <div class="bubble">
+        <div class="text">Hey John! I'm doing great, thanks for asking. How can I help you today?</div>
+        <div class="time">10:24 AM</div>
+      </div>
+    </div>
+    <div class="msg-row user">
+      <div class="bubble">
+        <div class="text">Can you check the weather?</div>
+        <div class="time">10:25 AM</div>
+      </div>
+    </div>
+    <div class="msg-row ai">
+      <div class="bubble">
+        <div class="text">Sure! It's 22 degrees C, partly cloudy in Moscow today. Perfect walk weather.</div>
+        <div class="time">10:25 AM</div>
+      </div>
+    </div>
+    <div class="msg-row user">
+      <div class="bubble">
+        <div class="text">Thanks! What about tomorrow?</div>
+        <div class="time">10:25 AM</div>
+      </div>
+    </div>
+    <div class="msg-row ai">
+      <div class="bubble">
+        <div class="text">Tomorrow: 24 degrees and sunny. No rain expected!</div>
+        <div class="time">10:25 AM</div>
+      </div>
+    </div>
+    <div class="typing">
+      <span class="label">Aigena is typing</span>
+      <div class="dots"><span></span><span></span><span></span></div>
+    </div>
+  </div>
+  <div class="input-bar">
+    <input type="text" placeholder="Type a message..." value="What's the plan for today?">
+    <button class="send-btn">&gt;</button>
+  </div>
+  <div class="nav-bar"><div class="pill"></div></div>
+</div>
+</body>
+</html>

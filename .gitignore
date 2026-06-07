@@ -1,0 +1,49 @@
+# Build outputs (any depth)
+**/build/
+**/.gradle/
+*.apk
+*.aab
+
+# IDE
+**/.idea/
+*.iml
+
+# Secrets & local config — NEVER commit these
+**/config.json
+**/local.properties
+**/secrets.xml
+**/.env
+**/google-services.json
+*.keystore
+*.jks
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Database files
+*.db
+*.db-*
+*.db.*
+
+# Logs
+*.log
+
+# Backups
+*.bak
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Android local
+local.properties
+
+# Uploaded media (test artifacts — don't commit user files)
+server/uploads/*
+server/media/*
+
+# OS noise
+Thumbs.db
+.DS_Store
