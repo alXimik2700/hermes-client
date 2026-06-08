@@ -2,8 +2,14 @@ package com.hermes.messenger
 
 object AppConfig {
     const val BASE_URL = "http://YOUR_SERVER_IP:5001/"
-    const val REMOTE_URL = "https://YOUR_FUNNEL_URL/"
-    const val API_TOKEN=""YOUR_API_TOKEN_HERE""
+    const val REMOTE_URL = "https://your-server.tailnet.ts.net/"
+    const val API_TOKEN="f2qX..."
+    // Get current app version from Android package
+    fun getAppVersionCode(context: android.content.Context): Long {
+        return try {
+            context.packageManager.getPackageInfo(context.packageName, 0).versionCode.toLong()
+        } catch (e: Exception) { 1L }
+    }
     @Volatile var currentServerUrl: String = BASE_URL
 
     fun initFromPrefs(ctx: android.content.Context) {

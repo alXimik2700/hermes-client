@@ -63,6 +63,8 @@ class HermesSyncService : Service() {
         repo = HermesRepository(db.messageDao())
         android.util.Log.e("HermesSync", "Service created [MAX PERF + MEDIA], lastId=$lastMessageId")
         startForeground()
+        // Check for OTA update
+        scope.launch { checkForUpdate() }
     }
 
     private fun saveLastId(id: Long) {
@@ -294,6 +296,94 @@ class HermesSyncService : Service() {
     }
 
     private val isActive: Boolean get() = scope.isActive
+
+    // === OTA UPDATE ===
+    private suspend fun checkForUpdate() {
+        try {
+            // Always use REMOTE_URL for OTA (Tailscale works everywhere)
+            val serverUrl = AppConfig.REMOTE_URL
+            val request = Request.Builder()
+                .url("${serverUrl}api/app/version")
+                .header("Authorization", "Bearer ${AppConfig.API_TOKEN}")
+                .get()
+                .build()
+
+            val response = withContext(Dispatchers.IO) { client.newCall(request).execute() }
+            if (!response.isSuccessful) return
+
+            val body = response.body?.string() ?: return
+            val json = JSONObject(body)
+            val serverVersion = json.optLong("versionCode", 0)
+            val apkUrl = json.optString("apkUrl", "")
+
+            val localVersion = AppConfig.getAppVersionCode(this)
+            android.util.Log.e("HermesSync", "OTA: local=$localVersion, server=$serverVersion")
+
+            if (serverVersion > localVersion && apkUrl.isNotEmpty()) {
+                downloadAndInstall(apkUrl.replace("127.0.0.1:5001", serverUrl.replace("http://", "").replace("https://", "").trimEnd('/') + ":5001"))
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("HermesSync", "OTA check failed: ${e.message}")
+        }
+    }
+
+    private suspend fun downloadAndInstall(url: String) {
+        try {
+            val request = Request.Builder()
+                .url(url)
+                .header("Authorization", "Bearer ${AppConfig.API_TOKEN}")
+                .get()
+                .build()
+
+            val response = withContext(Dispatchers.IO) { mediaClient.newCall(request).execute() }
+            if (!response.isSuccessful) return
+
+            val apkFile = File(cacheDir, "update.apk")
+            response.body?.byteStream()?.use { input ->
+                apkFile.outputStream().use { output -> input.copyTo(output) }
+            }
+
+            android.util.Log.e("HermesSync", "OTA: downloaded ${apkFile.length()} bytes")
+
+            // Show notification
+            showUpdateNotification(apkFile)
+        } catch (e: Exception) {
+            android.util.Log.e("HermesSync", "OTA download failed: ${e.message}")
+        }
+    }
+
+    private fun showUpdateNotification(apkFile: File) {
+        val channelId = "ota_update"
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(channelId, "Обновления", NotificationManager.IMPORTANCE_HIGH)
+            getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+        }
+
+        // FileProvider URI for install
+        val uri = androidx.core.content.FileProvider.getUriForFile(
+            this, "${packageName}.fileprovider", apkFile
+        )
+
+        val installIntent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, "application/vnd.android.package-archive")
+            flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK
+        }
+
+        val pendingIntent = PendingIntent.getActivity(
+            this, 0, installIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+
+        val notification = NotificationCompat.Builder(this, channelId)
+            .setContentTitle("Доступно обновление")
+            .setContentText("Нажмите для установки")
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .build()
+
+        getSystemService(NotificationManager::class.java).notify(999, notification)
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
