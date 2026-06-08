@@ -51,15 +51,10 @@ Every message gets a `client_uuid` (generated client-side, `UNIQUE` constraint o
 
 ## Screenshots
 
-<details>
-<summary>📱 Screenshots</summary>
-<br>
-
-| Chat | Profile | Settings |
-|---|---|---|
-| ![Chat](.github/assets/chat.png) | ![Profile](.github/assets/profile.png) | ![Settings](.github/assets/settings.png) |
-
-</details>
+| Chat | Settings | Profile | Home |
+|---|---|---|---|
+| ![](.github/assets/screenshots/244aa028-a6d3-4fc9-982c-d854c865375b.jpg) | ![](.github/assets/screenshots/92275cb8-41c6-4c53-b853-4b4f3a4c736c.jpg) | ![](.github/assets/screenshots/4105d993-e37e-4d11-883e-f76da47b7b76.jpg) | ![](.github/assets/screenshots/1780938347b5d4.png) |
+---
 
 ## Setup
 
