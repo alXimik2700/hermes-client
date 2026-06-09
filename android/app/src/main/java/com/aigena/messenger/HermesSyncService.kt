@@ -36,10 +36,13 @@ class HermesSyncService : Service() {
     // Wake-up channel: signaled on network available to interrupt backoff sleep
     private val networkWakeChannel = kotlinx.coroutines.channels.Channel<Unit>(kotlinx.coroutines.channels.Channel.CONFLATED)
 
-    // MAX PERFORMANCE OkHttp client — text messages + long-poll (rebuild on network change)
+    // MAX PERFORMANCE OkHttp client — text messages (rebuild on network change)
     @Volatile private var client: OkHttpClient = buildClient(null)
     // MEDIA OkHttp client — separate pool, longer timeouts (rebuild on network change)
     @Volatile private var mediaClient: OkHttpClient = buildMediaClient(null)
+
+    // WebSocket manager — real-time message delivery (replaces long-poll)
+    private lateinit var wsManager: HermesWebSocketManager
 
     /** Wrap android.net.Network SocketFactory (java.net) -> javax.net.SocketFactory for OkHttp. */
     private fun javaxSocketFactory(network: Network): SocketFactory {
@@ -101,6 +104,11 @@ class HermesSyncService : Service() {
         mediaClient = buildMediaClient(network)
         activeNetwork = network
         isNetworkAvailable = network != null
+        // Reconnect WebSocket on new network
+        if (::wsManager.isInitialized) {
+            val sf = network?.let { javaxSocketFactory(it) }
+            wsManager.setNetworkFactory(sf)
+        }
         // Wake sync loop
         networkWakeChannel.trySend(Unit)
         android.util.Log.e("HermesSync", "Switched to network: $network, available=$isNetworkAvailable")
@@ -109,6 +117,7 @@ class HermesSyncService : Service() {
     private val networkCallback = object : ConnectivityManager.NetworkCallback() {
         override fun onAvailable(network: Network) {
             android.util.Log.e("HermesSync", "Network available: $network")
+            AppConfig.currentServerUrl = AppConfig.BASE_URL
             switchToNetwork(network)
         }
 
@@ -116,9 +125,14 @@ class HermesSyncService : Service() {
             android.util.Log.e("HermesSync", "Network lost: $network")
             if (activeNetwork == network) {
                 isNetworkAvailable = false
+                // Switch to Tailscale IP for mobile network
+                AppConfig.currentServerUrl = AppConfig.REMOTE_URL
+                wsManager.disconnect()
+                wsManager = HermesWebSocketManager(AppConfig.currentServerUrl, AppConfig.API_TOKEN)
+                wsManager.connect(lastMessageId)
                 client.connectionPool.evictAll()
                 mediaClient.connectionPool.evictAll()
-                android.util.Log.e("HermesSync", "Active network lost, pools evicted")
+                android.util.Log.e("HermesSync", "Active network lost, switched to REMOTE_URL: ${AppConfig.REMOTE_URL}")
             }
         }
 
@@ -143,8 +157,14 @@ class HermesSyncService : Service() {
         repo = HermesRepository(db.messageDao())
         connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
         connectivityManager.registerDefaultNetworkCallback(networkCallback)
-        android.util.Log.e("HermesSync", "Service created [NETWORK-AWARE], lastId=$lastMessageId")
+        // Init WebSocket manager (replaces long-poll)
+        wsManager = HermesWebSocketManager(
+            serverUrl = AppConfig.currentServerUrl,
+            token = AppConfig.API_TOKEN
+        )
+        android.util.Log.e("HermesSync", "Service created [NETWORK-AWARE+WS], lastId=$lastMessageId")
         startForeground()
+        scope.launch { checkForUpdate() }
     }
 
     private fun saveLastId(id: Long) {
@@ -162,10 +182,12 @@ class HermesSyncService : Service() {
             syncRunning = true
             scope.launch { syncLoop() }
         }
+        scope.launch { checkForUpdate() }
         return START_STICKY
     }
 
     private fun startForeground() {
+        scope.launch { checkForUpdate() }
         val channelId = "hermes_sync"
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(channelId, "Hermes Sync",
@@ -184,37 +206,57 @@ class HermesSyncService : Service() {
     }
 
     private suspend fun syncLoop() {
-        android.util.Log.e("HermesSync", "Sync loop started, BASE_URL=${AppConfig.currentServerUrl}")
+        android.util.Log.e("HermesSync", "Sync loop started [WS mode], BASE_URL=${AppConfig.currentServerUrl}")
+        // Connect WebSocket for real-time message delivery
+        wsManager.connect(lastMessageId)
+
+        // Start collector for incoming WebSocket messages
+        scope.launch { collectWSMessages() }
+
         var backoffIndex = 0
         while (isActive) {
             try {
-                // 1. Send all pending messages
+                // 1. Send all pending messages (HTTP REST — unchanged)
                 flushPending()
 
-                // 2. Long-poll for new AI replies
-                val (msgs, maxId) = longPoll(lastMessageId)
-                for ((text, ts, serverId) in msgs) {
-                    repo.addAgentReply(text, ts, serverId)
-                }
-                if (maxId > lastMessageId) {
-                    saveLastId(maxId)
-                    backoffIndex = 0
-                }
+                // 2. WebSocket delivers messages in real-time via collectWSMessages()
+                //    No long-poll needed — just keepalive flush cycle
+                backoffIndex = 0
             } catch (e: Exception) {
                 android.util.Log.e("HermesSync", "Sync error: ${e.message}", e)
                 backoffIndex = (backoffIndex + 1).coerceAtMost(AppConfig.BACKOFF_SEQUENCE.size - 1)
             }
-            // Network-aware backoff: wake immediately if network becomes available
+            // Periodic flush interval (WebSocket handles real-time delivery)
             val backoffMs = AppConfig.BACKOFF_SEQUENCE[backoffIndex]
             try {
                 withTimeout(backoffMs) {
                     networkWakeChannel.receive()  // blocks until network event
                 }
-                // Network came back — reset backoff, retry immediately
                 android.util.Log.e("HermesSync", "Woke by network event, resetting backoff")
                 backoffIndex = 0
             } catch (_: kotlinx.coroutines.TimeoutCancellationException) {
                 // Normal timeout — backoff completed, continue loop
+            }
+        }
+    }
+
+    /** Collect WebSocket messages and save to Room DB. */
+    private suspend fun collectWSMessages() {
+        wsManager.incomingMessages.collect { msg ->
+            try {
+                if (msg.sender == "ai") {
+                    val ts = try {
+                        val fmt = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss", java.util.Locale.US)
+                        fmt.timeZone = java.util.TimeZone.getTimeZone("UTC")
+                        fmt.parse(msg.time)?.time ?: System.currentTimeMillis()
+                    } catch (_: Exception) { System.currentTimeMillis() }
+                    repo.addAgentReply(msg.text, ts, msg.id)
+                }
+                if (msg.id > lastMessageId) {
+                    saveLastId(msg.id)
+                }
+            } catch (e: Exception) {
+                android.util.Log.e("HermesSync", "WS save error: ${e.message}")
             }
         }
     }
@@ -392,9 +434,76 @@ class HermesSyncService : Service() {
 
     override fun onDestroy() {
         connectivityManager.unregisterNetworkCallback(networkCallback)
+        wsManager.disconnect()
         client.connectionPool.evictAll()
         mediaClient.connectionPool.evictAll()
         scope.cancel()
         super.onDestroy()
+    }
+    // === OTA UPDATE ===
+    private suspend fun checkForUpdate() {
+        try {
+            val serverUrl = AppConfig.REMOTE_URL
+            val request = okhttp3.Request.Builder()
+                .url("${serverUrl}api/app/version")
+                .header("Authorization", "Bearer ${AppConfig.API_TOKEN}")
+                .get()
+                .build()
+            val response = withContext(Dispatchers.IO) { client.newCall(request).execute() }
+            if (!response.isSuccessful) return
+            val body = response.body?.string() ?: return
+            val json = org.json.JSONObject(body)
+            val serverVersion = json.optLong("versionCode", 0)
+            val localVersion = AppConfig.getAppVersionCode(this)
+            android.util.Log.e("HermesSync", "OTA: local=$localVersion, server=$serverVersion")
+            if (serverVersion > localVersion) {
+                downloadAndInstall("${serverUrl}api/app/download")
+            }
+        } catch (e: Exception) {
+            android.util.Log.e("HermesSync", "OTA check failed: ${e.message}")
+        }
+    }
+
+    private suspend fun downloadAndInstall(url: String) {
+        try {
+            val request = okhttp3.Request.Builder()
+                .url(url)
+                .header("Authorization", "Bearer ${AppConfig.API_TOKEN}")
+                .get()
+                .build()
+            val response = withContext(Dispatchers.IO) { mediaClient.newCall(request).execute() }
+            if (!response.isSuccessful) return
+            val apkFile = java.io.File(cacheDir, "update.apk")
+            response.body?.byteStream()?.use { input ->
+                apkFile.outputStream().use { output -> input.copyTo(output) }
+            }
+            android.util.Log.e("HermesSync", "OTA: downloaded ${apkFile.length()} bytes")
+            showUpdateNotification(apkFile)
+        } catch (e: Exception) {
+            android.util.Log.e("HermesSync", "OTA download failed: ${e.message}")
+        }
+    }
+
+    private fun showUpdateNotification(apkFile: java.io.File) {
+        val channelId = "ota_update"
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(channelId, "Обновления", NotificationManager.IMPORTANCE_HIGH)
+            getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
+        }
+        val uri = androidx.core.content.FileProvider.getUriForFile(this, "${packageName}.fileprovider", apkFile)
+        val installIntent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, "application/vnd.android.package-archive")
+            flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK
+        }
+        val pendingIntent = PendingIntent.getActivity(this, 0, installIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+        val notification = NotificationCompat.Builder(this, channelId)
+            .setContentTitle("Доступно обновление")
+            .setContentText("Нажмите для установки")
+            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .build()
+        getSystemService(NotificationManager::class.java).notify(999, notification)
     }
 }

@@ -9,10 +9,19 @@ import android.os.Bundle
 import android.view.Gravity
 import android.widget.FrameLayout
 import android.widget.VideoView
+import com.aigena.messenger.AppUpdater
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 class SplashActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // OTA check — runs in background while splash video plays
+        CoroutineScope(Dispatchers.IO).launch {
+            AppUpdater.check(this@SplashActivity)
+        }
 
         val videoView = VideoView(this)
         videoView.setVideoURI(Uri.parse("android.resource://${packageName}/${R.raw.splash_video}"))

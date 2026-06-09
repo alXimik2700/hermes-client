@@ -177,6 +177,46 @@ fun ChatScreen(viewModel: ChatViewModel, tr: (String) -> String) {
         }
     }
 
+    // === ONBOARDING: first-run server config ===
+    var showOnboarding by remember { mutableStateOf(false) }
+    var onboardingUrl by remember { mutableStateOf("") }
+    LaunchedEffect(Unit) {
+        if (AppConfig.currentServerUrl.contains("YOUR_SERVER_IP") ||
+            AppConfig.currentServerUrl.contains("YOUR_TAILSCALE")) {
+            onboardingUrl = ""
+            showOnboarding = true
+        }
+    }
+    if (showOnboarding) {
+        AlertDialog(
+            onDismissRequest = {},
+            title = { Text("Welcome to Aigena", fontWeight = FontWeight.Bold) },
+            text = {
+                Column {
+                    Text("Enter your server address:", fontSize = 14.sp)
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = onboardingUrl,
+                        onValueChange = { onboardingUrl = it },
+                        singleLine = true,
+                        placeholder = { Text("http://192.168.1.X:5001") }
+                    )
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    if (onboardingUrl.isNotBlank()) {
+                        AppConfig.saveServerUrl(ctx, onboardingUrl.trimEnd('/') + "/")
+                        showOnboarding = false
+                    }
+                }) { Text("Connect") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showOnboarding = false }) { Text("Later") }
+            }
+        )
+    }
+
     // === PICKERS ===
 
     // Image picker — PickVisualMedia обходит MIUI Gallery bug
@@ -204,6 +244,10 @@ fun ChatScreen(viewModel: ChatViewModel, tr: (String) -> String) {
     var voiceDraft by remember { mutableStateOf<java.io.File?>(null) }
     var recordingStartMs by remember { mutableLongStateOf(0L) }
     var recordingDuration by remember { mutableLongStateOf(0L) }
+
+    // WebSocket voice streaming (HermesVoiceStreamer) — long-press activates
+    var voiceStreamer by remember { mutableStateOf<HermesVoiceStreamer?>(null) }
+    var isStreaming by remember { mutableStateOf(false) }
 
     // Timer tick while recording
     LaunchedEffect(isRecording) {
@@ -302,6 +346,11 @@ fun ChatScreen(viewModel: ChatViewModel, tr: (String) -> String) {
                         Spacer(Modifier.width(4.dp))
                         Text(if (connectionStatus is ConnectionStatus.Online) tr("chat_online") else tr("chat_offline"),
                             fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        // Agent status: thinking/typing indicator
+                        if (viewModel.isThinking.collectAsStateWithLifecycle().value) {
+                            Spacer(Modifier.width(6.dp))
+                            Text(tr("chat_typing"), fontSize = 10.sp, color = Color(0xFFFFAB40))
+                        }
                         Spacer(Modifier.width(8.dp))
                         Text("[${messages.size}]", fontSize = 10.sp, color = AigenaColors.textSecondary)
                         if (pendingCount > 0) {
@@ -422,7 +471,7 @@ fun ChatScreen(viewModel: ChatViewModel, tr: (String) -> String) {
                         Box(modifier = Modifier
                             .size(44.dp)
                             .then(
-                                if (isRecording) Modifier.background(AigenaColors.error, CircleShape)
+                                if (isRecording || isStreaming) Modifier.background(AigenaColors.error, CircleShape)
                                 else Modifier
                             )
                             .pointerInput(hasAudioPermission) {
@@ -435,11 +484,41 @@ fun ChatScreen(viewModel: ChatViewModel, tr: (String) -> String) {
                                         while (true) {
                                             val down = awaitFirstDown(requireUnconsumed = false)
                                             down.consume()
-                                            if (!isRecording) {
+                                            if (!isRecording && !isStreaming) {
                                                 if (startRecording()) {
+                                                    var switchedToStreaming = false
+                                                    val streamingJob = scope.launch {
+                                                        delay(1000)
+                                                        if (isRecording && !switchedToStreaming) {
+                                                            switchedToStreaming = true
+                                                            cancelRecording()
+                                                            val streamer = HermesVoiceStreamer(
+                                                                AppConfig.currentServerUrl,
+                                                                AppConfig.API_TOKEN
+                                                            ).also { voiceStreamer = it }
+                                                            streamer.onStateChanged = { active -> isStreaming = active }
+                                                            streamer.onError = { err ->
+                                                                Toast.makeText(ctx, "Voice: $err", Toast.LENGTH_SHORT).show()
+                                                            }
+                                                            streamer.start()
+                                                            isStreaming = true
+                                                            Toast.makeText(ctx, "\uD83C\uDF99\uFE0F \u0421\u0442\u0440\u0438\u043C\u0438\u043D\u0433...", Toast.LENGTH_SHORT).show()
+                                                        }
+                                                    }
                                                     val up = waitForUpOrCancellation()
-                                                    if (up != null) stopRecording() else cancelRecording()
+                                                    streamingJob.cancel()
+                                                    if (switchedToStreaming || isStreaming) {
+                                                        voiceStreamer?.stop()
+                                                        voiceStreamer = null
+                                                        isStreaming = false
+                                                    } else {
+                                                        stopRecording()
+                                                    }
                                                 }
+                                            } else if (isStreaming) {
+                                                voiceStreamer?.stop()
+                                                voiceStreamer = null
+                                                isStreaming = false
                                             }
                                         }
                                     }
@@ -447,9 +526,11 @@ fun ChatScreen(viewModel: ChatViewModel, tr: (String) -> String) {
                             },
                             contentAlignment = Alignment.Center) {
                             Icon(
-                                if (isRecording) Icons.Filled.Stop else Icons.Filled.Mic,
+                                if (isStreaming) Icons.Filled.Call
+                                else if (isRecording) Icons.Filled.Stop
+                                else Icons.Filled.Mic,
                                 null,
-                                tint = if (isRecording) Color.White else AigenaColors.textSecondary,
+                                tint = if (isRecording || isStreaming) Color.White else AigenaColors.textSecondary,
                                 modifier = Modifier.size(26.dp)
                             )
                         }
@@ -718,6 +799,7 @@ fun SettingsScreen(tr: (String) -> String) {
     val ctx = LocalContext.current
     var serverUrl by remember { mutableStateOf(AppConfig.currentServerUrl) }
     var remoteMode by remember { mutableStateOf(AppConfig.isRemoteMode(ctx)) }
+    var mobileRemoteUrl by remember { mutableStateOf(AppConfig.mobileServerUrl) }
     var connectionStatus by remember { mutableStateOf<String?>(null) }
     var connectionColor by remember { mutableStateOf(AigenaColors.textSecondary) }
     val scope = rememberCoroutineScope()
@@ -758,6 +840,38 @@ fun SettingsScreen(tr: (String) -> String) {
                             singleLine = true, placeholder = { Text("http://ip:5000", color = MaterialTheme.colorScheme.onSurfaceVariant) },
                             colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = MaterialTheme.colorScheme.primary),
                             shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth())
+                        Spacer(Modifier.height(8.dp))
+                        Button(onClick = {
+                            AppConfig.saveServerUrl(ctx, serverUrl)
+                            connectionStatus = "Saved!"
+                            connectionColor = AigenaColors.success
+                        }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                            modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp)) {
+                            Text("Save & Apply", color = Color.White, fontSize = 14.sp)
+                        }
+                    }
+                }
+            }
+            // Mobile server URL
+            item {
+                Surface(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), color = MaterialTheme.colorScheme.surface, shape = RoundedCornerShape(12.dp)) {
+                    Column(Modifier.padding(12.dp)) {
+                        Text(tr("settings_mobile_url"), fontSize = 13.sp, color = AigenaColors.textSecondary)
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            OutlinedTextField(
+                                value = mobileRemoteUrl,
+                                onValueChange = { mobileRemoteUrl = it },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Button(onClick = {
+                                AppConfig.saveMobileUrl(ctx, mobileRemoteUrl.trimEnd('/') + "/")
+                                serverUrl = AppConfig.currentServerUrl
+                            }) {
+                                Text("Save", fontSize = 12.sp)
+                            }
+                        }
                     }
                 }
             }
@@ -766,7 +880,7 @@ fun SettingsScreen(tr: (String) -> String) {
                     Row(Modifier.padding(12.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                         Column(Modifier.weight(1f)) {
                             Text(tr("settings_remote_mode"), fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface)
-                            Text(if (remoteMode) AppConfig.REMOTE_URL else AppConfig.BASE_URL,
+                            Text(if (remoteMode) AppConfig.mobileServerUrl else AppConfig.BASE_URL,
                                 fontSize = 11.sp, color = AigenaColors.textSecondary, maxLines = 1)
                         }
                         Switch(checked = remoteMode, onCheckedChange = { enabled ->
@@ -806,7 +920,12 @@ fun SettingsScreen(tr: (String) -> String) {
                         }
                         DropdownMenu(expanded = langExpanded, onDismissRequest = { langExpanded = false }) {
                             listOf(LocaleHelper.Lang.EN, LocaleHelper.Lang.RU).forEach { l ->
-                                DropdownMenuItem(text = { Text(l.display) }, onClick = { selectedLang = l; langExpanded = false; LocaleHelper.setLanguage(ctx, l) })
+                                DropdownMenuItem(text = { Text(l.display) }, onClick = {
+                                    selectedLang = l; langExpanded = false
+                                    LocaleHelper.setLanguage(ctx, l)
+                                    // Restart activity to apply language
+                                    (ctx as? android.app.Activity)?.recreate()
+                                })
                             }
                         }
                     }

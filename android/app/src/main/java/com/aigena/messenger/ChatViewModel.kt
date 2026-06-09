@@ -38,6 +38,11 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val _pendingCount = MutableStateFlow(0)
     val pendingCount: StateFlow<Int> = _pendingCount.asStateFlow()
 
+    private val _isThinking = MutableStateFlow(false)
+    val isThinking: StateFlow<Boolean> = _isThinking.asStateFlow()
+
+    fun setThinking(thinking: Boolean) { _isThinking.value = thinking }
+
     init {
         viewModelScope.launch {
             _pendingCount.value = repo.pendingCount()

@@ -1,11 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
     <!-- English (default) -->
-    <string name="app_name">Aigena</string>
+    <string name="app_name">Hermes</string>
     <string name="nav_chat">Chat</string>
     <string name="nav_profile">Profile</string>
     <string name="nav_settings">Settings</string>
-    <string name="chat_title">Aigena</string>
+    <string name="chat_title">Hermes</string>
     <string name="chat_online">Online</string>
     <string name="chat_thinking">thinking...</string>
     <string name="chat_connecting">Connecting...</string>
@@ -13,9 +13,9 @@
     <string name="chat_placeholder">Type a message...</string>
     <string name="chat_empty">Start a conversation...</string>
     <string name="chat_waiting">Waiting for connection...</string>
-    <string name="chat_typing">Aigena is typing...</string>
-    <string name="chat_welcome">Aigena Messenger</string>
-    <string name="profile_name">Aigena</string>
+    <string name="chat_typing">Hermes is typing...</string>
+    <string name="chat_welcome">Hermes Messenger</string>
+    <string name="profile_name">Hermes</string>
     <string name="profile_role">AI Assistant</string>
     <string name="profile_bio">Always here to help</string>
     <string name="tab_photos">Photos</string>
@@ -59,4 +59,11 @@
     <string name="retry">Retry</string>
     <string name="lang_switched">Language changed</string>
     <string name="settings_remote_mode">Mobile data (remote)</string>
+    <string name="settings_mobile_url">Mobile server URL</string>
+    <string name="settings_save_apply">Save and Apply</string>
+    <string name="settings_saved_ok">Saved!</string>
+    <string name="onboarding_welcome">Welcome to Hermes</string>
+    <string name="onboarding_enter_url">Enter server address:</string>
+    <string name="onboarding_connect">Connect</string>
+    <string name="onboarding_later">Later</string>
 </resources>

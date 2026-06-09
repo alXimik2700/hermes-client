@@ -58,4 +58,12 @@
     <string name="upload_failed">Ошибка отправки</string>
     <string name="retry">Повторить</string>
     <string name="settings_remote_mode">Мобильный интернет (удалённо)</string>
+    <string name="settings_mobile_url">Сервер для моб. сети</string>
+    <string name="settings_save_apply">Сохранить и применить</string>
+    <string name="settings_saved_ok">Сохранено!</string>
+    <string name="onboarding_welcome">Добро пожаловать в Hermes</string>
+    <string name="onboarding_enter_url">Введите адрес сервера:</string>
+    <string name="onboarding_connect">Подключиться</string>
+    <string name="onboarding_later">Позже</string>
+    <string name="lang_switched">Язык изменён</string>
 </resources>
