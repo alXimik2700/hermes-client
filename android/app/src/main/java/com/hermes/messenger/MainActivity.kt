@@ -1,5 +1,6 @@
 package com.hermes.messenger
 
+import android.Manifest
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -34,6 +35,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -48,6 +50,7 @@ import androidx.navigation.compose.rememberNavController
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.hermes.messenger.data.HermesMessageEntity
+import com.hermes.messenger.R
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -81,8 +84,8 @@ fun HermesApp(viewModel: ChatViewModel = viewModel(), profileVM: ProfileViewMode
     val navController = rememberNavController()
     val currentRoute = navController.currentBackStackEntryAsState().value?.destination?.route
     val ctx = LocalContext.current
-    val lang = remember { LocaleHelper.getLanguage(ctx) }
-    val tr: (String) -> String = remember(lang) { { key -> LocaleHelper.getString(ctx, key, lang) } }
+    var lang by remember { mutableStateOf(LocaleHelper.getLanguage(ctx)) }; android.util.Log.e("LANG", "HermesApp: lang=$lang")
+    val tr: (String) -> String = { key -> LocaleHelper.getString(ctx, key, lang) }
     val view = LocalView.current
 
     // Keyboard detector for MIUI/HyperOS
@@ -124,10 +127,12 @@ fun HermesApp(viewModel: ChatViewModel = viewModel(), profileVM: ProfileViewMode
         },
         containerColor = MaterialTheme.colorScheme.background,
     ) { innerPadding ->
+        key(lang) {
         NavHost(navController, "chat", Modifier.padding(innerPadding)) {
             composable("chat") { ChatScreen(viewModel, tr) }
             composable("profile") { ProfileScreen(tr, profileVM) }
-            composable("settings") { SettingsScreen(tr) }
+            composable("settings") { SettingsScreen(tr, onLangChanged = { android.util.Log.e("LANG", "onLangChanged: $it"); lang = it }) }
+        }
         }
     }
 }
@@ -140,16 +145,21 @@ fun HermesApp(viewModel: ChatViewModel = viewModel(), profileVM: ProfileViewMode
 fun ChatScreen(viewModel: ChatViewModel, tr: (String) -> String) {
     val ctx = LocalContext.current
     val rawMessages by viewModel.messages.collectAsStateWithLifecycle()
-    // ASC by timestamp: oldest at top, newest at bottom
-    // No re-sort needed — DB already returns ORDER BY timestamp ASC
-    val messages = rawMessages
+    val streamTokens by viewModel.streamTokens.collectAsStateWithLifecycle()
+    val streamingIds by viewModel.streamingIds.collectAsStateWithLifecycle()
+    // Overlay streaming tokens onto messages (RAM-only, no Room write per token)
+    val messages = rawMessages.map { msg ->
+        val overlay = streamTokens[msg.serverId]
+        if (overlay != null) msg.copy(text = overlay) else msg
+    }
     val connectionStatus by viewModel.connectionStatus.collectAsStateWithLifecycle()
     val loading by viewModel.loading.collectAsStateWithLifecycle()
     val pendingCount by viewModel.pendingCount.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
 
-    var inputText by remember { mutableStateOf("") }
+        var inputText by remember { mutableStateOf("") }
+        var targetMode by remember { mutableStateOf("hermes") } // "hermes" or "mimo"
     var fullscreenImageUrl by remember { mutableStateOf<String?>(null) }
     var lastMessageCount by remember { mutableIntStateOf(0) }
     var lastAiCount by remember { mutableIntStateOf(0) }
@@ -175,6 +185,88 @@ fun ChatScreen(viewModel: ChatViewModel, tr: (String) -> String) {
             lastAiCount = aiCount
             lastMessageCount = messages.size
         }
+    }
+
+    // === ONBOARDING: first-run server config ===
+    var showOnboarding by remember { mutableStateOf(false) }
+    var showQrScanner by remember { mutableStateOf(false) }
+    var onboardingUrl by remember { mutableStateOf("") }
+    var onboardingToken by remember { mutableStateOf("") }
+
+    // Camera permission launcher
+    val cameraPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) showQrScanner = true
+    }
+
+    LaunchedEffect(Unit) {
+        val url = AppConfig.currentServerUrl
+        if (url.contains("your-server") || url.contains("YOUR_") || url.isEmpty()) {
+            onboardingUrl = AppConfig.REMOTE_URL
+            showOnboarding = true
+        }
+    }
+
+    // QR Scanner overlay
+    if (showQrScanner) {
+        QrScanner(
+            onScanned = { url, token ->
+                onboardingUrl = url
+                onboardingToken = token
+                showQrScanner = false
+                // Auto-connect if both URL and token present
+                if (url.isNotBlank() && token.isNotBlank()) {
+                    AppConfig.saveServerUrl(ctx, url.trimEnd('/') + "/")
+                    SecureConfig.setApiToken(ctx, token)
+                    showOnboarding = false
+                }
+            },
+            onDismiss = { showQrScanner = false }
+        )
+    }
+
+    if (showOnboarding) {
+        AlertDialog(
+            onDismissRequest = {},
+            title = { Text(tr("onboarding_welcome"), fontWeight = FontWeight.Bold) },
+            text = {
+                Column {
+                    Text(tr("onboarding_enter_url"), fontSize = 14.sp)
+                    Spacer(Modifier.height(8.dp))
+                    OutlinedTextField(
+                        value = onboardingUrl,
+                        onValueChange = { onboardingUrl = it },
+                        singleLine = true,
+                        placeholder = { Text("https://your-server.ts.net") }
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    // QR scan button
+                    OutlinedButton(
+                        onClick = {
+                            cameraPermissionLauncher.launch(Manifest.permission.CAMERA)
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("📷 Сканировать QR-код")
+                    }
+                }
+            },
+            confirmButton = {
+                Button(onClick = {
+                    if (onboardingUrl.isNotBlank()) {
+                        AppConfig.saveServerUrl(ctx, onboardingUrl.trimEnd('/') + "/")
+                        if (onboardingToken.isNotBlank()) {
+                            SecureConfig.setApiToken(ctx, onboardingToken)
+                        }
+                        showOnboarding = false
+                    }
+                }) { Text(tr("onboarding_connect")) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showOnboarding = false }) { Text(tr("onboarding_later")) }
+            }
+        )
     }
 
     // === PICKERS ===
@@ -204,6 +296,10 @@ fun ChatScreen(viewModel: ChatViewModel, tr: (String) -> String) {
     var voiceDraft by remember { mutableStateOf<java.io.File?>(null) }
     var recordingStartMs by remember { mutableLongStateOf(0L) }
     var recordingDuration by remember { mutableLongStateOf(0L) }
+
+    // WebSocket voice streaming (HermesVoiceStreamer) — long-press activates
+    var voiceStreamer by remember { mutableStateOf<HermesVoiceStreamer?>(null) }
+    var isStreaming by remember { mutableStateOf(false) }
 
     // Timer tick while recording
     LaunchedEffect(isRecording) {
@@ -236,10 +332,10 @@ fun ChatScreen(viewModel: ChatViewModel, tr: (String) -> String) {
             currentRecorder = recorder
             isRecording = true; lastVoiceFile = file
             recordingStartMs = System.currentTimeMillis()
-            Toast.makeText(ctx, "Запись...", Toast.LENGTH_SHORT).show()
+            Toast.makeText(ctx, ctx.getString(R.string.recording_started), Toast.LENGTH_SHORT).show()
             true
         } catch (e: Exception) {
-            Toast.makeText(ctx, "Ошибка микрофона", Toast.LENGTH_SHORT).show()
+            Toast.makeText(ctx, ctx.getString(R.string.recording_error), Toast.LENGTH_SHORT).show()
             false
         }
     }
@@ -263,18 +359,34 @@ fun ChatScreen(viewModel: ChatViewModel, tr: (String) -> String) {
             cancelRecording()
             return
         }
-        // Small delay to let MediaRecorder finalize file headers, then set draft
+        // Small delay to let MediaRecorder finalize file headers, then verify
         scope.launch {
-            delay(100)
-            voiceDraft = lastVoiceFile
-            Toast.makeText(ctx, "Записано ${elapsed / 1000}с", Toast.LENGTH_SHORT).show()
+            delay(150)
+            val file = lastVoiceFile
+            if (file != null && file.exists() && file.length() > 0) {
+                voiceDraft = file
+                Toast.makeText(ctx, ctx.getString(R.string.recording_done, elapsed / 1000), Toast.LENGTH_SHORT).show()
+            } else {
+                lastVoiceFile?.delete()
+                lastVoiceFile = null
+                voiceDraft = null
+                Toast.makeText(ctx, ctx.getString(R.string.recording_empty_error), Toast.LENGTH_LONG).show()
+                android.util.Log.e("Voice", "stopRecording: file empty or missing after ${elapsed}ms")
+            }
         }
     }
 
     fun sendVoiceDraft() {
-        voiceDraft?.let { viewModel.sendVoice(Uri.fromFile(it), it.name) }
-        voiceDraft = null
-        Toast.makeText(ctx, "Отправлено", Toast.LENGTH_SHORT).show()
+        val draft = voiceDraft
+        if (draft != null && draft.exists() && draft.length() > 0) {
+            viewModel.sendVoice(Uri.fromFile(draft), draft.name, targetMode)
+            voiceDraft = null
+            // Toast removed — message appearing in chat is the confirmation
+            // If sendMediaFile fails, ChatViewModel will show error toast
+        } else {
+            voiceDraft = null
+            Toast.makeText(ctx, ctx.getString(R.string.recording_file_corrupted), Toast.LENGTH_LONG).show()
+        }
     }
 
     fun deleteVoiceDraft() {
@@ -302,6 +414,11 @@ fun ChatScreen(viewModel: ChatViewModel, tr: (String) -> String) {
                         Spacer(Modifier.width(4.dp))
                         Text(if (connectionStatus is ConnectionStatus.Online) tr("chat_online") else tr("chat_offline"),
                             fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        // Agent status: thinking/typing indicator
+                        if (viewModel.isThinking.collectAsStateWithLifecycle().value) {
+                            Spacer(Modifier.width(6.dp))
+                            Text(tr("chat_typing"), fontSize = 10.sp, color = Color(0xFFFFAB40))
+                        }
                         Spacer(Modifier.width(8.dp))
                         Text("[${messages.size}]", fontSize = 10.sp, color = HermesColors.textSecondary)
                         if (pendingCount > 0) {
@@ -364,7 +481,7 @@ fun ChatScreen(viewModel: ChatViewModel, tr: (String) -> String) {
 
                     Spacer(Modifier.width(4.dp))
 
-                    // === CENTER: Oval — only text, no emoji ===
+                    // === CENTER: Oval — text input with target selector ===
                     Row(
                         modifier = Modifier
                             .weight(1f)
@@ -372,13 +489,33 @@ fun ChatScreen(viewModel: ChatViewModel, tr: (String) -> String) {
                                 color = MaterialTheme.colorScheme.surfaceVariant,
                                 shape = RoundedCornerShape(24.dp)
                             )
-                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                            .padding(start = 4.dp, end = 16.dp, top = 4.dp, bottom = 4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        // Target chip — tap to switch
+                        Surface(
+                            onClick = {
+                                targetMode = if (targetMode == "hermes") "mimo" else "hermes"
+                            },
+                            color = if (targetMode == "mimo")
+                                MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
+                            else MaterialTheme.colorScheme.surfaceVariant,
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.padding(end = 6.dp)
+                        ) {
+                            Text(
+                                if (targetMode == "mimo") "@mimo" else "@hermes",
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                fontSize = 11.sp,
+                                color = if (targetMode == "mimo")
+                                    MaterialTheme.colorScheme.primary
+                                else MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                         BasicTextField(
                             value = inputText,
                             onValueChange = { inputText = it },
-                            modifier = Modifier.fillMaxWidth(),
+                            modifier = Modifier.weight(1f),
                             cursorBrush = SolidColor(Color.White),
                             minLines = 1,
                             maxLines = 6,
@@ -389,8 +526,8 @@ fun ChatScreen(viewModel: ChatViewModel, tr: (String) -> String) {
                             decorationBox = { innerTextField ->
                                 Box(Modifier.fillMaxWidth()) {
                                     if (inputText.isEmpty()) {
-                                        Text(tr("chat_placeholder"),
-                                            color = HermesColors.textSecondary, fontSize = 16.sp)
+                                        val hint = if (targetMode == "mimo") "Написать MiMo..." else tr("chat_placeholder")
+                                        Text(hint, color = HermesColors.textSecondary, fontSize = 16.sp)
                                     }
                                     innerTextField()
                                 }
@@ -406,14 +543,14 @@ fun ChatScreen(viewModel: ChatViewModel, tr: (String) -> String) {
                             IconButton(onClick = { deleteVoiceDraft() }, modifier = Modifier.size(40.dp)) {
                                 Icon(Icons.Filled.Delete, null, tint = HermesColors.error, modifier = Modifier.size(24.dp))
                             }
-                            Text("Голосовое записано", Modifier.weight(1f), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Text(stringResource(R.string.voice_recorded), Modifier.weight(1f), fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             IconButton(onClick = { sendVoiceDraft() }) {
                                 Icon(Icons.AutoMirrored.Filled.Send, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
                             }
                         }
                     } else if (inputText.isNotBlank()) {
                         Box(modifier = Modifier.size(44.dp).background(MaterialTheme.colorScheme.primary, CircleShape)
-                            .clickable { viewModel.sendMessage(inputText.trim()); inputText = "" },
+                            .clickable { viewModel.sendMessage(inputText.trim(), targetMode); inputText = "" },
                             contentAlignment = Alignment.Center) {
                             Icon(Icons.AutoMirrored.Filled.Send, tr("send"), tint = Color.White, modifier = Modifier.size(22.dp))
                         }
@@ -422,7 +559,7 @@ fun ChatScreen(viewModel: ChatViewModel, tr: (String) -> String) {
                         Box(modifier = Modifier
                             .size(44.dp)
                             .then(
-                                if (isRecording) Modifier.background(HermesColors.error, CircleShape)
+                                if (isRecording || isStreaming) Modifier.background(HermesColors.error, CircleShape)
                                 else Modifier
                             )
                             .pointerInput(hasAudioPermission) {
@@ -435,11 +572,61 @@ fun ChatScreen(viewModel: ChatViewModel, tr: (String) -> String) {
                                         while (true) {
                                             val down = awaitFirstDown(requireUnconsumed = false)
                                             down.consume()
-                                            if (!isRecording) {
+                                            if (!isRecording && !isStreaming) {
+                                                // Tap: start recording
                                                 if (startRecording()) {
-                                                    val up = waitForUpOrCancellation()
-                                                    if (up != null) stopRecording() else cancelRecording()
+                                                    var switchedToStreaming = false
+                                                    val startY = down.position.y
+
+                                                    // Track drag to detect swipe-up for streaming
+                                                    while (true) {
+                                                        val event = awaitPointerEvent()
+                                                        val pointer = event.changes.firstOrNull() ?: continue
+                                                        if (!pointer.pressed) {
+                                                            // Finger up
+                                                            break
+                                                        }
+                                                        val dy = startY - pointer.position.y
+                                                        // Swipe up > 60dp = switch to streaming
+                                                        if (!switchedToStreaming && dy > 60f) {
+                                                            switchedToStreaming = true
+                                                            cancelRecording()
+                                                            // Use scope.launch to avoid restricted scope issue
+                                                            scope.launch {
+                                                                delay(100)
+                                                                val streamer = HermesVoiceStreamer(
+                                                                    AppConfig.currentServerUrl,
+                                                                    AppConfig.API_TOKEN
+                                                                ).also { voiceStreamer = it }
+                                                                streamer.onStateChanged = { active -> isStreaming = active }
+                                                                streamer.onError = { err ->
+                                                                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                                                                        Toast.makeText(ctx, "Voice: $err", Toast.LENGTH_SHORT).show()
+                                                                    }
+                                                                }
+                                                                streamer.start()
+                                                                isStreaming = true
+                                                                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                                                                    Toast.makeText(ctx, "\uD83C\uDF99\uFE0F \u0421\u0442\u0440\u0438\u043C\u0438\u043D\u0433...", Toast.LENGTH_SHORT).show()
+                                                                }
+                                                            }
+                                                        }
+                                                        pointer.consume()
+                                                    }
+
+                                                    // Finger up — decide what to do
+                                                    if (switchedToStreaming || isStreaming) {
+                                                        voiceStreamer?.stop()
+                                                        voiceStreamer = null
+                                                        isStreaming = false
+                                                    } else {
+                                                        stopRecording()
+                                                    }
                                                 }
+                                            } else if (isStreaming) {
+                                                voiceStreamer?.stop()
+                                                voiceStreamer = null
+                                                isStreaming = false
                                             }
                                         }
                                     }
@@ -447,9 +634,11 @@ fun ChatScreen(viewModel: ChatViewModel, tr: (String) -> String) {
                             },
                             contentAlignment = Alignment.Center) {
                             Icon(
-                                if (isRecording) Icons.Filled.Stop else Icons.Filled.Mic,
+                                if (isStreaming) Icons.Filled.Call
+                                else if (isRecording) Icons.Filled.Stop
+                                else Icons.Filled.Mic,
                                 null,
-                                tint = if (isRecording) Color.White else HermesColors.textSecondary,
+                                tint = if (isRecording || isStreaming) Color.White else HermesColors.textSecondary,
                                 modifier = Modifier.size(26.dp)
                             )
                         }
@@ -602,7 +791,9 @@ fun AudioWidget(fileName: String, localFilePath: String?, remoteUrl: String?) {
                         .connectTimeout(15, java.util.concurrent.TimeUnit.SECONDS)
                         .readTimeout(30, java.util.concurrent.TimeUnit.SECONDS)
                         .build()
-                    val req = okhttp3.Request.Builder().url(remoteUrl).get().build()
+                    val req = okhttp3.Request.Builder().url(remoteUrl)
+                        .header("Authorization", "Bearer ${AppConfig.API_TOKEN}")
+                        .get().build()
                     client.newCall(req).execute().use { resp ->
                         if (resp.isSuccessful) cacheFile.outputStream().use {
                             resp.body?.byteStream()?.copyTo(it)
@@ -650,7 +841,7 @@ fun ProfileScreen(tr: (String) -> String, profileVM: ProfileViewModel) {
     val status by profileVM.status.collectAsStateWithLifecycle()
     val mediaTabs by profileVM.mediaTabs.collectAsStateWithLifecycle()
     var selectedTab by remember { mutableIntStateOf(0) }
-    val tabNames = listOf(tr("tab_photo"), tr("tab_video"), tr("tab_file"), tr("tab_link"), tr("tab_voice"))
+    val tabNames = listOf(tr("tab_photos"), tr("tab_videos"), tr("tab_files"), tr("tab_links"), tr("tab_voice"))
     val tabIcons = listOf(Icons.Filled.Photo, Icons.Filled.Videocam, Icons.Filled.AttachFile, Icons.Filled.Link, Icons.Filled.Mic)
 
     LaunchedEffect(selectedTab) { profileVM.loadTab(selectedTab) }
@@ -714,10 +905,11 @@ fun ProfileScreen(tr: (String) -> String, profileVM: ProfileViewModel) {
 // =============================================================================
 
 @Composable
-fun SettingsScreen(tr: (String) -> String) {
+fun SettingsScreen(tr: (String) -> String, onLangChanged: (LocaleHelper.Lang) -> Unit = {}) {
     val ctx = LocalContext.current
     var serverUrl by remember { mutableStateOf(AppConfig.currentServerUrl) }
     var remoteMode by remember { mutableStateOf(AppConfig.isRemoteMode(ctx)) }
+    var mobileRemoteUrl by remember { mutableStateOf(AppConfig.mobileServerUrl) }
     var connectionStatus by remember { mutableStateOf<String?>(null) }
     var connectionColor by remember { mutableStateOf(HermesColors.textSecondary) }
     val scope = rememberCoroutineScope()
@@ -758,6 +950,38 @@ fun SettingsScreen(tr: (String) -> String) {
                             singleLine = true, placeholder = { Text("http://ip:5000", color = MaterialTheme.colorScheme.onSurfaceVariant) },
                             colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = MaterialTheme.colorScheme.primary),
                             shape = RoundedCornerShape(8.dp), modifier = Modifier.fillMaxWidth())
+                        Spacer(Modifier.height(8.dp))
+                        Button(onClick = {
+                            AppConfig.saveServerUrl(ctx, serverUrl)
+                            connectionStatus = tr("settings_saved_ok")
+                            connectionColor = HermesColors.success
+                        }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                            modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(8.dp)) {
+                            Text(tr("settings_save_apply"), color = Color.White, fontSize = 14.sp)
+                        }
+                    }
+                }
+            }
+            // Mobile server URL
+            item {
+                Surface(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp), color = MaterialTheme.colorScheme.surface, shape = RoundedCornerShape(12.dp)) {
+                    Column(Modifier.padding(12.dp)) {
+                        Text(tr("settings_mobile_url"), fontSize = 13.sp, color = HermesColors.textSecondary)
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            OutlinedTextField(
+                                value = mobileRemoteUrl,
+                                onValueChange = { mobileRemoteUrl = it },
+                                singleLine = true,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Button(onClick = {
+                                AppConfig.saveMobileUrl(ctx, mobileRemoteUrl.trimEnd('/') + "/")
+                                serverUrl = AppConfig.currentServerUrl
+                            }) {
+                                Text(tr("settings_save"), fontSize = 12.sp)
+                            }
+                        }
                     }
                 }
             }
@@ -766,7 +990,7 @@ fun SettingsScreen(tr: (String) -> String) {
                     Row(Modifier.padding(12.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
                         Column(Modifier.weight(1f)) {
                             Text(tr("settings_remote_mode"), fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurface)
-                            Text(if (remoteMode) AppConfig.REMOTE_URL else AppConfig.BASE_URL,
+                            Text(if (remoteMode) AppConfig.mobileServerUrl else AppConfig.BASE_URL,
                                 fontSize = 11.sp, color = HermesColors.textSecondary, maxLines = 1)
                         }
                         Switch(checked = remoteMode, onCheckedChange = { enabled ->
@@ -806,7 +1030,13 @@ fun SettingsScreen(tr: (String) -> String) {
                         }
                         DropdownMenu(expanded = langExpanded, onDismissRequest = { langExpanded = false }) {
                             listOf(LocaleHelper.Lang.EN, LocaleHelper.Lang.RU).forEach { l ->
-                                DropdownMenuItem(text = { Text(l.display) }, onClick = { selectedLang = l; langExpanded = false; LocaleHelper.setLanguage(ctx, l) })
+                                DropdownMenuItem(text = { Text(l.display) }, onClick = {
+                                    selectedLang = l; langExpanded = false
+                                    LocaleHelper.setLanguage(ctx, l)
+                                    onLangChanged(l)
+                                    selectedLang = l
+                                    langExpanded = false
+                                })
                             }
                         }
                     }

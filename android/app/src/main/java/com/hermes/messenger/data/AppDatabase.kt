@@ -16,7 +16,8 @@ data class HermesMessageEntity(
     val messageType: String = "TEXT",  // TEXT, VOICE, IMAGE, FILE
     val localFilePath: String? = null, // local cache path (e.g. voice .m4a, photo from gallery)
     val fileUrl: String? = null,       // server URL filled after successful sync (e.g. /media/uuid.jpg)
-    val serverId: Long? = null         // server-assigned sequential id for correct ordering
+    val serverId: Long? = null,        // server-assigned sequential id for correct ordering
+    val target: String = "hermes"      // hermes or mimo
 ) {
     companion object {
         const val STATUS_PENDING = 0
@@ -65,6 +66,10 @@ interface MessageDao {
     /** Set serverId for media messages after upload. */
     @Query("UPDATE messages SET serverId = :serverId, status = 1 WHERE id = :id")
     suspend fun markSentWithServerId(id: String, serverId: Long)
+
+    /** Dedup AI messages by server id. */
+    @Query("SELECT EXISTS(SELECT 1 FROM messages WHERE serverId = :serverId)")
+    suspend fun existsByServerId(serverId: Long): Boolean
 }
 
 /** Migration v1→v2: add media columns. */
@@ -83,7 +88,14 @@ val MIGRATION_2_3 = object : Migration(2, 3) {
     }
 }
 
-@Database(entities = [HermesMessageEntity::class], version = 3, exportSchema = false)
+/** Migration v3→v4: add target column for mimo/hermes routing. */
+val MIGRATION_3_4 = object : Migration(3, 4) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE messages ADD COLUMN target TEXT NOT NULL DEFAULT 'hermes'")
+    }
+}
+
+@Database(entities = [HermesMessageEntity::class], version = 4, exportSchema = false)
 abstract class AppDatabase : RoomDatabase() {
     abstract fun messageDao(): MessageDao
 
@@ -95,7 +107,7 @@ abstract class AppDatabase : RoomDatabase() {
                 INSTANCE ?: Room.databaseBuilder(
                     context.applicationContext,
                     AppDatabase::class.java, "hermes_messages.db"
-                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                  .build().also { INSTANCE = it }
             }
         }

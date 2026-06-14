@@ -14,14 +14,15 @@ class HermesRepository(private val dao: MessageDao) {
 
     val messagesFlow: Flow<List<HermesMessageEntity>> = dao.getAllMessagesFlow()
 
-    suspend fun sendMessage(text: String): HermesMessageEntity {
+    suspend fun sendMessage(text: String, target: String = "hermes"): HermesMessageEntity {
         val msg = HermesMessageEntity(
             id = UUID.randomUUID().toString(),
             text = text,
             timestamp = System.currentTimeMillis(),
             isFromAgent = false,
             status = HermesMessageEntity.STATUS_PENDING,
-            messageType = HermesMessageEntity.TYPE_TEXT
+            messageType = HermesMessageEntity.TYPE_TEXT,
+            target = target
         )
         dao.insert(msg)
         return msg
@@ -30,7 +31,8 @@ class HermesRepository(private val dao: MessageDao) {
     suspend fun sendMedia(
         messageType: String,
         localFilePath: String,
-        displayText: String = "[Media]"
+        displayText: String = "[Media]",
+        target: String = "hermes"
     ): HermesMessageEntity {
         val msg = HermesMessageEntity(
             id = UUID.randomUUID().toString(),
@@ -39,13 +41,32 @@ class HermesRepository(private val dao: MessageDao) {
             isFromAgent = false,
             status = HermesMessageEntity.STATUS_PENDING,
             messageType = messageType,
-            localFilePath = localFilePath
+            localFilePath = localFilePath,
+            target = target
         )
         dao.insert(msg)
         return msg
     }
 
-    /** Add AI reply with server timestamp and serverId for correct ordering. */
+    /** Save AI streaming reply to Room ONCE on stream_complete. */
+    suspend fun saveAIMessage(serverId: Long, text: String) {
+        if (dao.existsByServerId(serverId)) return
+        val msgType = when {
+            text.startsWith("[Voice:") || text.startsWith("[VoiceReply:") -> HermesMessageEntity.TYPE_VOICE
+            text.startsWith("[File:") -> HermesMessageEntity.TYPE_FILE
+            else -> HermesMessageEntity.TYPE_TEXT
+        }
+        val msg = HermesMessageEntity(
+            id = UUID.randomUUID().toString(),
+            text = text,
+            timestamp = System.currentTimeMillis(),
+            isFromAgent = true,
+            status = HermesMessageEntity.STATUS_SENT,
+            messageType = msgType,
+            serverId = if (serverId > 0) serverId else null
+        )
+        dao.insert(msg)
+    }
     suspend fun addAgentReply(text: String, serverTimestamp: Long = System.currentTimeMillis(), serverId: Long = 0) {
         if (dao.existsByTextAndSender(text, isFromAgent = true)) return
         val msgType = when {

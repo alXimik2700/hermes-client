@@ -59,4 +59,24 @@
     <string name="retry">Retry</string>
     <string name="lang_switched">Language changed</string>
     <string name="settings_remote_mode">Mobile data (remote)</string>
+    <string name="settings_mobile_url">Mobile server URL</string>
+    <string name="settings_save_apply">Save and Apply</string>
+    <string name="settings_saved_ok">Saved!</string>
+    <string name="onboarding_welcome">Welcome to Hermes</string>
+    <string name="onboarding_enter_url">Enter server address or scan QR:</string>
+    <string name="onboarding_scan_qr">Scan QR code</string>
+    <string name="onboarding_connect">Connect</string>
+    <string name="onboarding_later">Later</string>
+    <string name="ota_channel_name">Updates</string>
+    <string name="ota_title">Update Available</string>
+    <string name="ota_content">Tap to install</string>
+    <string name="recording_started">Recording...</string>
+    <string name="recording_error">Microphone error</string>
+    <string name="recording_done">Recorded %ds</string>
+    <string name="voice_recorded">Voice message recorded</string>
+    <string name="streaming_label">Streaming...</string>
+    <string name="recording_empty_error">Error: microphone did not record audio</string>
+    <string name="recording_file_corrupted">Error: recording file is corrupted</string>
+    <string name="audio_read_error">Error: failed to read audio</string>
+    <string name="send_error">Error sending: %s</string>
 </resources>

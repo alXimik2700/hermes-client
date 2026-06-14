@@ -5,9 +5,11 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
+import android.widget.Toast
 import androidx.core.content.FileProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -17,14 +19,7 @@ import org.json.JSONObject
 import java.io.File
 import java.util.concurrent.TimeUnit
 
-/**
- * OTA Updater — checks for new version, downloads APK, triggers install.
- * Call AppUpdater.check(context) from HermesSyncService.onCreate()
- */
 object AppUpdater {
-
-    private const val PREFS_NAME = "app_updater"
-    private const val KEY_LAST_CHECKED = "last_checked_version"
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
@@ -57,26 +52,16 @@ object AppUpdater {
             val json = JSONObject(body)
             val serverVersion = json.getInt("versionCode")
             val apkUrl = json.getString("apkUrl")
-            val apkSize = json.optLong("apkSize", 0)
 
             val currentVersion = context.packageManager
                 .getPackageInfo(context.packageName, 0)
-                .longVersionCode
-                .toInt() // versionCode as int for comparison
+                .longVersionCode.toInt()
 
-            if (serverVersion <= currentVersion) {
-                return // Already up to date
-            }
+            if (serverVersion <= currentVersion) return
 
-            // Prevent duplicate download for same version
-            val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            if (prefs.getInt(KEY_LAST_CHECKED, 0) >= serverVersion) return
-
-            // Download APK
             downloadApk(context, apkUrl, serverVersion)
 
         } catch (e: Exception) {
-            // Silently fail — update is not critical
             e.printStackTrace()
         }
     }
@@ -84,74 +69,87 @@ object AppUpdater {
     private fun downloadApk(context: Context, apkUrl: String, version: Int) {
         val dm = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
 
-        // Replace localhost with actual server if needed
-        val url = apkUrl
-            .replace("127.0.0.1:5001", AppConfig.REMOTE_URL.trimEnd('/')
-                .replace("http://", "")
-                .replace("https://", ""))
+        val url = apkUrl.replace("127.0.0.1:5001", AppConfig.REMOTE_URL.trimEnd('/')
+            .replace("http://", "").replace("https://", ""))
 
-        val token = AppConfig.API_TOKEN
         val request = DownloadManager.Request(Uri.parse(url))
             .setTitle("Hermes Messenger Update")
-            .setDescription("Downloading version $version...")
+            .setDescription("Version $version ready")
             .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-            .setDestinationInExternalPublicDir(
-                Environment.DIRECTORY_DOWNLOADS,
-                "hermes-messenger-v$version.apk"
-            )
-            .addRequestHeader("Authorization", "Bearer $token")
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            request.setRequiresCharging(false)
-        }
+            .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, "hermes-update.apk")
+            .addRequestHeader("Authorization", "Bearer ${AppConfig.API_TOKEN}")
 
         val downloadId = dm.enqueue(request)
 
-        // Mark as checked
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-            .edit()
-            .putInt(KEY_LAST_CHECKED, version)
-            .apply()
-
-        // Register receiver to open APK after download
         val onComplete = object : BroadcastReceiver() {
             override fun onReceive(ctx: Context, intent: Intent) {
                 val id = intent.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1)
                 if (id != downloadId) return
                 ctx.unregisterReceiver(this)
-                installApk(ctx, "hermes-messenger-v$version.apk")
+                val file = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "hermes-update.apk")
+                if (file.exists() && verifyApkSignature(ctx, file)) {
+                    installApk(ctx)
+                } else {
+                    file.delete()
+                }
             }
         }
 
-        context.registerReceiver(
-            onComplete,
-            IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE),
-            Context.RECEIVER_NOT_EXPORTED
-        )
+        context.registerReceiver(onComplete, IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE), Context.RECEIVER_NOT_EXPORTED)
     }
 
-    private fun installApk(context: Context, filename: String) {
-        val file = File(
-            Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS),
-            filename
-        )
+    private fun verifyApkSignature(context: Context, apkFile: File): Boolean {
+        return try {
+            val pm = context.packageManager
+            val packageInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                pm.getPackageArchiveInfo(apkFile.absolutePath, PackageManager.GET_SIGNING_CERTIFICATES)
+            } else {
+                @Suppress("DEPRECATION")
+                pm.getPackageArchiveInfo(apkFile.absolutePath, PackageManager.GET_SIGNATURES)
+            }
+
+            if (packageInfo == null) return false
+
+            val ourSignature = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                val signingInfo = pm.getPackageInfo(context.packageName, PackageManager.GET_SIGNING_CERTIFICATES).signingInfo
+                if (signingInfo.hasMultipleSigners()) {
+                    signingInfo.apkContentsSigners[0].toByteArray()
+                } else {
+                    signingInfo.signingCertificateHistory[0].toByteArray()
+                }
+            } else {
+                @Suppress("DEPRECATION")
+                pm.getPackageInfo(context.packageName, PackageManager.GET_SIGNATURES).signatures[0].toByteArray()
+            }
+
+            val apkSignature = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                val signingInfo = packageInfo.signingInfo
+                if (signingInfo.hasMultipleSigners()) {
+                    signingInfo.apkContentsSigners[0].toByteArray()
+                } else {
+                    signingInfo.signingCertificateHistory[0].toByteArray()
+                }
+            } else {
+                @Suppress("DEPRECATION")
+                packageInfo.signatures[0].toByteArray()
+            }
+
+            ourSignature.contentEquals(apkSignature)
+        } catch (e: Exception) {
+            false
+        }
+    }
+
+    private fun installApk(context: Context) {
+        val file = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "hermes-update.apk")
         if (!file.exists()) return
 
-        val uri: Uri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-            FileProvider.getUriForFile(
-                context,
-                "${context.packageName}.fileprovider",
-                file
-            )
-        } else {
-            Uri.fromFile(file)
-        }
+        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
 
         val installIntent = Intent(Intent.ACTION_VIEW).apply {
             setDataAndType(uri, "application/vnd.android.package-archive")
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION
         }
-
         context.startActivity(installIntent)
     }
 }

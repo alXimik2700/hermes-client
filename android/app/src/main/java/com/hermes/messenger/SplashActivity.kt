@@ -9,10 +9,29 @@ import android.os.Bundle
 import android.view.Gravity
 import android.widget.FrameLayout
 import android.widget.VideoView
+import com.hermes.messenger.AppUpdater
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 class SplashActivity : Activity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // OTA check — runs in background while splash video plays
+        CoroutineScope(Dispatchers.IO).launch {
+            AppUpdater.check(this@SplashActivity)
+
+            // Always load server URL from prefs
+            val prefs = getSharedPreferences("hermes_config", MODE_PRIVATE)
+            val savedUrl = prefs.getString("server_url", null)
+            if (savedUrl != null) {
+                AppConfig.currentServerUrl = savedUrl
+                AppConfig.mobileServerUrl = prefs.getString("mobile_url", savedUrl) ?: savedUrl
+            } else {
+                AppConfig.initFromPrefs(this@SplashActivity)
+            }
+        }
 
         val videoView = VideoView(this)
         videoView.setVideoURI(Uri.parse("android.resource://${packageName}/${R.raw.splash_video}"))
