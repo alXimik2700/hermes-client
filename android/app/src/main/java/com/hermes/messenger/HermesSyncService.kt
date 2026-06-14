@@ -204,7 +204,7 @@ class HermesSyncService : Service() {
     }
 
     private suspend fun syncLoop() {
-        android.util.Log.e("HermesSync", "Sync loop started [WS mode], BASE_URL=${AppConfig.currentServerUrl}")
+        android.util.Log.e("HermesSync", "Sync loop started [WS+Poll mode], BASE_URL=${AppConfig.currentServerUrl}")
         // Connect WebSocket for real-time message delivery
         wsManager.connect(lastMessageId)
 
@@ -213,19 +213,34 @@ class HermesSyncService : Service() {
         scope.launch { collectStreaming() }
 
         var backoffIndex = 0
+        var lastPollTime = 0L
         while (isActive) {
             try {
                 // 1. Send all pending messages (HTTP REST — unchanged)
                 flushPending()
 
-                // 2. WebSocket delivers messages in real-time via collectWSMessages()
-                //    No long-poll needed — just keepalive flush cycle
+                // 2. If WebSocket not connected, fallback to long-poll
+                if (!wsManager.isConnected) {
+                    val now = System.currentTimeMillis()
+                    if (now - lastPollTime > 5000) { // Poll every 5 seconds max
+                        val (replies, newSinceId) = longPoll(lastMessageId)
+                        if (replies.isNotEmpty()) {
+                            for ((text, ts, id) in replies) {
+                                saveLastId(id)
+                                repo.addAgentReply(text, ts, id)
+                            }
+                            android.util.Log.e("HermesSync", "Poll fallback: got ${replies.size} replies")
+                        }
+                        lastPollTime = now
+                    }
+                }
+
                 backoffIndex = 0
             } catch (e: Exception) {
                 android.util.Log.e("HermesSync", "Sync error: ${e.message}", e)
                 backoffIndex = (backoffIndex + 1).coerceAtMost(AppConfig.BACKOFF_SEQUENCE.size - 1)
             }
-            // Periodic flush interval (WebSocket handles real-time delivery)
+            // Periodic flush interval
             val backoffMs = AppConfig.BACKOFF_SEQUENCE[backoffIndex]
             try {
                 withTimeout(backoffMs) {

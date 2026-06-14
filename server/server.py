@@ -264,6 +264,7 @@ def qr_page():
 </html>"""
 
 @app.route("/api/agent/status")
+@limiter.limit("120 per minute")
 def api_agent_status():
     if not check_auth(): return jsonify({"error":"unauthorized"}), 401
     with _agent_state["lock"]: s = dict(_agent_state)
@@ -487,6 +488,7 @@ def process_voice(mid, filepath, stored_name):
         with _agent_state["lock"]: _agent_state["status"] = "online"
 
 @app.route("/api/messages")
+@limiter.limit("120 per minute")
 def api_messages():
     if not check_auth(): return jsonify({"error":"unauthorized"}), 401
     since = request.args.get("since",0,type=int)
@@ -508,6 +510,84 @@ def api_latest():
     db = get_db()
     rows = db.execute("SELECT id,sender,text,sender_name,target,created_at FROM messages ORDER BY id DESC LIMIT ?",(count,)).fetchall()
     return jsonify({"messages":[{"id":r["id"],"sender":r["sender"],"text":r["text"],"sender_name":r["sender_name"],"target":r["target"],"time":r["created_at"]} for r in reversed(rows)]})
+
+@app.route("/api/messages/attachments")
+def api_attachments():
+    """Get messages with attachments (photos, videos, files, voice, links)."""
+    if not check_auth(): return jsonify({"error":"unauthorized"}), 401
+    attach_type = request.args.get("type", "photo")
+    limit = min(request.args.get("limit", 30, type=int), 100)
+
+    # Map type to text pattern in message
+    type_patterns = {
+        "photo": "[Image:",
+        "video": "[Video:",
+        "file": "[File:",
+        "voice": "[Voice:",
+        "link": "http",
+    }
+    pattern = type_patterns.get(attach_type, "[File:")
+
+    db = get_db()
+    rows = db.execute(
+        "SELECT id, sender, text, created_at FROM messages WHERE text LIKE ? ORDER BY id DESC LIMIT ?",
+        (f"%{pattern}%", limit)
+    ).fetchall()
+
+    messages = []
+    for r in rows:
+        text = r["text"]
+        # Parse attachment info from text
+        att_type = "file"
+        url = ""
+        filename = ""
+
+        if text.startswith("[Image:"):
+            att_type = "photo"
+            fn = text.replace("[Image: ", "").replace("]", "").strip()
+            filename = fn
+            url = f"/uploads/{fn}"
+        elif text.startswith("[Video:"):
+            att_type = "video"
+            fn = text.replace("[Video: ", "").replace("]", "").strip()
+            filename = fn
+            url = f"/uploads/{fn}"
+        elif text.startswith("[File:"):
+            att_type = "file"
+            fn = text.replace("[File: ", "").replace("]", "").strip()
+            filename = fn
+            url = f"/uploads/{fn}"
+        elif text.startswith("[Voice:"):
+            att_type = "voice"
+            fn = text.replace("[Voice: ", "").replace("]", "").strip()
+            filename = fn
+            url = f"/uploads/{fn}"
+        elif text.startswith("[VoiceReply:"):
+            att_type = "voice"
+            fn = text.replace("[VoiceReply: ", "").replace("]", "").strip()
+            filename = fn
+            url = f"/uploads/{fn}"
+        elif "http" in text:
+            att_type = "link"
+            # Extract first URL
+            import re
+            urls = re.findall(r'https?://[^\s]+', text)
+            url = urls[0] if urls else ""
+            filename = text[:50]
+
+        messages.append({
+            "id": r["id"],
+            "sender": r["sender"],
+            "text": text[:100],
+            "time": r["created_at"],
+            "attachment": {
+                "type": att_type,
+                "url": url,
+                "filename": filename,
+            }
+        })
+
+    return jsonify({"messages": messages})
 
 # --- Mimo endpoints ---
 
@@ -545,6 +625,7 @@ def api_mimo_reply():
     return jsonify({"status": "ok", "message_id": mid})
 
 @app.route("/uploads/<path:fn>")
+@limiter.limit("200 per minute")
 def serve_upload(fn):
     if not check_auth(): return jsonify({"error":"unauthorized"}), 401
     from werkzeug.utils import safe_join; from flask import send_file
@@ -557,6 +638,43 @@ def serve_media(fn):
     from werkzeug.utils import safe_join; from flask import send_file
     p = safe_join(str(UPLOAD_FOLDER), fn)
     return send_file(p) if p and os.path.isfile(p) else (jsonify({"error":"not found"}),404)
+
+# --- Push Notifications (FCM) ---
+
+FCM_TOKENS = []  # In-memory, reset on restart. Use DB for production.
+
+@app.route("/api/register-push", methods=["POST"])
+def register_push():
+    """Register FCM token for push notifications."""
+    if not check_auth(): return jsonify({"error":"unauthorized"}), 401
+    data = request.get_json(silent=True)
+    if not data or "fcm_token" not in data:
+        return jsonify({"error":"missing fcm_token"}), 400
+    token = data["fcm_token"]
+    if token not in FCM_TOKENS:
+        FCM_TOKENS.append(token)
+        print(f"[push] Registered FCM token: {token[:20]}...", flush=True)
+    return jsonify({"status": "ok"})
+
+def send_push_notification(title, body, data=None):
+    """Send push notification to all registered devices."""
+    if not FCM_TOKENS:
+        return
+
+    # Firebase Admin SDK would be used in production
+    # For now, log the notification
+    print(f"[push] {title}: {body}", flush=True)
+
+    # TODO: Implement Firebase Admin SDK
+    # from firebase_admin import messaging
+    # message = messaging.MulticastMessage(
+    #     notification=messaging.Notification(title=title, body=body),
+    #     data=data or {},
+    #     tokens=FCM_TOKENS
+    # )
+    # response = messaging.send_each(message)
+
+# --- Main ---
 
 if __name__ == "__main__":
     init_db()

@@ -45,6 +45,17 @@
             android:foregroundServiceType="dataSync"
             android:exported="false" />
 
+        <!-- HermesMessagingService — uncomment when Firebase is configured -->
+        <!--
+        <service
+            android:name="com.hermes.messenger.HermesMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+        -->
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

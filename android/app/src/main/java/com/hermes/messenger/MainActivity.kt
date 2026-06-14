@@ -1,6 +1,7 @@
 package com.hermes.messenger
 
 import android.Manifest
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -60,6 +61,7 @@ import android.widget.Toast
 import androidx.core.content.ContextCompat
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.gestures.awaitFirstDown
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -843,14 +845,61 @@ fun ProfileScreen(tr: (String) -> String, profileVM: ProfileViewModel) {
     var selectedTab by remember { mutableIntStateOf(0) }
     val tabNames = listOf(tr("tab_photos"), tr("tab_videos"), tr("tab_files"), tr("tab_links"), tr("tab_voice"))
     val tabIcons = listOf(Icons.Filled.Photo, Icons.Filled.Videocam, Icons.Filled.AttachFile, Icons.Filled.Link, Icons.Filled.Mic)
+    val ctx = LocalContext.current
+
+    // Avatar state
+    var avatarUri by remember { mutableStateOf<Uri?>(null) }
+    val prefs = remember { ctx.getSharedPreferences("hermes_config", Context.MODE_PRIVATE) }
+    val savedAvatarPath = prefs.getString("avatar_path", null)
+    if (savedAvatarPath != null && avatarUri == null) {
+        avatarUri = Uri.fromFile(File(savedAvatarPath))
+    }
+
+    // Avatar picker
+    val avatarPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        uri?.let {
+            // Copy to app internal storage
+            val inputStream = ctx.contentResolver.openInputStream(it) ?: return@let
+            val file = File(ctx.filesDir, "avatar.jpg")
+            file.outputStream().use { output -> inputStream.copyTo(output) }
+            prefs.edit().putString("avatar_path", file.absolutePath).apply()
+            avatarUri = Uri.fromFile(file)
+        }
+    }
 
     LaunchedEffect(selectedTab) { profileVM.loadTab(selectedTab) }
 
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         Surface(color = MaterialTheme.colorScheme.surface, shadowElevation = 4.dp) {
             Column(Modifier.fillMaxWidth().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Box(Modifier.size(96.dp).clip(CircleShape).background(MaterialTheme.colorScheme.primary),
-                    contentAlignment = Alignment.Center) { Text("A", color = MaterialTheme.colorScheme.onPrimary, fontSize = 40.sp, fontWeight = FontWeight.Bold) }
+                // Avatar with click to change
+                Box(
+                    Modifier.size(96.dp).clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primary)
+                        .clickable { avatarPicker.launch("image/*") },
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (avatarUri != null) {
+                        AsyncImage(
+                            model = ImageRequest.Builder(ctx).data(avatarUri).crossfade(true).build(),
+                            contentDescription = "Avatar",
+                            modifier = Modifier.fillMaxSize().clip(CircleShape),
+                            contentScale = ContentScale.Crop
+                        )
+                    } else {
+                        Text("A", color = MaterialTheme.colorScheme.onPrimary, fontSize = 40.sp, fontWeight = FontWeight.Bold)
+                    }
+                    // Camera icon overlay
+                    Icon(
+                        Icons.Filled.CameraAlt, null,
+                        modifier = Modifier.align(Alignment.BottomEnd).size(24.dp)
+                            .background(MaterialTheme.colorScheme.secondary, CircleShape)
+                            .padding(4.dp),
+                        tint = MaterialTheme.colorScheme.onSecondary
+                    )
+                }
                 Spacer(Modifier.height(12.dp))
                 Text(tr("profile_name"), color = MaterialTheme.colorScheme.onSurface, fontSize = 20.sp, fontWeight = FontWeight.Bold)
                 Row(verticalAlignment = Alignment.CenterVertically) {

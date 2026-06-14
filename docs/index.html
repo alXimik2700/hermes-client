@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hermes Messenger — приватный ИИ-чат</title>
+    <meta name="description" content="Offline-first Android мессенджер с голосовым вводом для работы с локальными ИИ-серверами. Ваши данные остаются на вашем оборудовании.">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0a0a0f; color: #e0e0e0; line-height: 1.6; }
+        .container { max-width: 900px; margin: 0 auto; padding: 60px 20px; }
+        h1 { font-size: 3rem; margin-bottom: 1rem; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .subtitle { font-size: 1.3rem; color: #888; margin-bottom: 3rem; }
+        .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 30px; margin: 40px 0; }
+        .feature { background: #12121a; border-radius: 12px; padding: 30px; border: 1px solid #1a1a2e; }
+        .feature h3 { color: #667eea; margin-bottom: 10px; font-size: 1.1rem; }
+        .feature p { color: #999; font-size: 0.95rem; }
+        .architecture { background: #12121a; border-radius: 12px; padding: 30px; margin: 40px 0; border: 1px solid #1a1a2e; }
+        .architecture pre { color: #667eea; font-family: 'SF Mono', monospace; font-size: 0.9rem; overflow-x: auto; }
+        .cta { text-align: center; margin: 60px 0; }
+        .cta a { display: inline-block; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 15px 40px; border-radius: 8px; text-decoration: none; font-weight: 600; font-size: 1.1rem; transition: transform 0.2s; }
+        .cta a:hover { transform: translateY(-2px); }
+        .stats { display: flex; justify-content: center; gap: 60px; margin: 40px 0; }
+        .stat { text-align: center; }
+        .stat .number { font-size: 2.5rem; font-weight: 700; color: #667eea; }
+        .stat .label { color: #666; font-size: 0.9rem; }
+        .tech { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; margin: 30px 0; }
+        .tech span { background: #1a1a2e; padding: 8px 16px; border-radius: 20px; font-size: 0.85rem; color: #888; }
+        footer { text-align: center; margin-top: 60px; padding-top: 30px; border-top: 1px solid #1a1a2e; color: #555; font-size: 0.9rem; }
+        footer a { color: #667eea; text-decoration: none; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Hermes Messenger</h1>
+        <p class="subtitle">Приватный мессенджер с голосовым ИИ. Ваши данные — на вашем оборудовании.</p>
+
+        <div class="features">
+            <div class="feature">
+                <h3>Офлайн-режим</h3>
+                <p>Сообщения сохраняются локально и синхронизируются при появлении связи. Ничего не теряется.</p>
+            </div>
+            <div class="feature">
+                <h3>Голосовой ввод</h3>
+                <p>Говорите — сервер распознаёт речь через whisper.cpp и озвучивает ответ через Piper.</p>
+            </div>
+            <div class="feature">
+                <h3>Любой ИИ</h3>
+                <p>Работает с Ollama, vLLM, LM Studio, OpenAI — любым API, совместимым с OpenAI.</p>
+            </div>
+            <div class="feature">
+                <h3>Приватность</h3>
+                <p>Данные не покидают ваш сервер. Трафик идёт через зашифрованные туннели.</p>
+            </div>
+        </div>
+
+        <div class="architecture">
+            <h3 style="color: #667eea; margin-bottom: 15px;">Архитектура</h3>
+            <pre>
+[Android приложение]
+        ↓
+[Room DB] ← оффлайн-хранилище
+        ↓
+[SyncService] → Tailscale → Flask API :5001
+                                ↓
+                         AI сервер (Ollama/OpenAI)
+                                ↓
+                    FastAPI :5002 ↔ whisper.cpp + Piper
+            </pre>
+        </div>
+
+        <div class="stats">
+            <div class="stat">
+                <div class="number">15</div>
+                <div class="label">тестов</div>
+            </div>
+            <div class="stat">
+                <div class="number">50+</div>
+                <div class="label">API эндпоинтов</div>
+            </div>
+            <div class="stat">
+                <div class="number">2</div>
+                <div class="label">языка (Kotlin + Python)</div>
+            </div>
+        </div>
+
+        <div class="tech">
+            <span>Kotlin</span>
+            <span>Jetpack Compose</span>
+            <span>Room</span>
+            <span>Flask</span>
+            <span>FastAPI</span>
+            <span>whisper.cpp</span>
+            <span>Piper</span>
+            <span>Tailscale</span>
+            <span>WebSocket</span>
+        </div>
+
+        <div class="cta">
+            <a href="https://github.com/alXimik2700/hermes-client">Смотреть на GitHub</a>
+        </div>
+
+        <footer>
+            <p>Создано с помощью ИИ-агента • <a href="https://github.com/alXimik2700/hermes-client/blob/master/LICENSE">MIT License</a></p>
+        </footer>
+    </div>
+</body>
+</html>

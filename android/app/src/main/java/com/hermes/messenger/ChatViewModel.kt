@@ -1,6 +1,8 @@
 package com.hermes.messenger
 
 import android.app.Application
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import android.net.Uri
 import com.hermes.messenger.R
 import androidx.lifecycle.AndroidViewModel
@@ -25,6 +27,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val ctx = application.applicationContext
     private val db = AppDatabase.getInstance(application)
     private val repo = HermesRepository(db.messageDao())
+    private val connectivityManager = ctx.getSystemService(ConnectivityManager::class.java)
 
     /** Completed messages from Room — source of truth. */
     val messages: StateFlow<List<HermesMessageEntity>> = repo.messagesFlow
@@ -42,7 +45,7 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
     private val _streamingIds = MutableStateFlow<Set<Long>>(emptySet())
     val streamingIds: StateFlow<Set<Long>> = _streamingIds.asStateFlow()
 
-    private val _connectionStatus = MutableStateFlow<ConnectionStatus>(ConnectionStatus.Online)
+    private val _connectionStatus = MutableStateFlow<ConnectionStatus>(ConnectionStatus.Offline)
     val connectionStatus: StateFlow<ConnectionStatus> = _connectionStatus.asStateFlow()
 
     private val _loading = MutableStateFlow(false)
@@ -56,7 +59,57 @@ class ChatViewModel(application: Application) : AndroidViewModel(application) {
 
     fun setThinking(thinking: Boolean) { _isThinking.value = thinking }
 
+    /**
+     * Check real network connectivity status.
+     */
+    private fun isNetworkAvailable(): Boolean {
+        try {
+            val network = connectivityManager.activeNetwork
+            if (network != null) {
+                val caps = connectivityManager.getNetworkCapabilities(network)
+                if (caps != null) {
+                    return caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                }
+            }
+            // Fallback: check if any network is available
+            val allNetworks = connectivityManager.allNetworks
+            for (net in allNetworks) {
+                val caps = connectivityManager.getNetworkCapabilities(net)
+                if (caps != null && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) {
+                    return true
+                }
+            }
+        } catch (_: Exception) {}
+        return false
+    }
+
+    /**
+     * Update connection status based on actual network state.
+     * Called periodically and on network changes.
+     */
+    fun refreshConnectionStatus() {
+        val online = isNetworkAvailable()
+        _connectionStatus.value = if (online) ConnectionStatus.Online else ConnectionStatus.Offline
+    }
+
     init {
+        // Check initial network state
+        refreshConnectionStatus()
+
+        // Monitor network changes
+        val callback = object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: android.net.Network) {
+                _connectionStatus.value = ConnectionStatus.Online
+            }
+            override fun onLost(network: android.net.Network) {
+                _connectionStatus.value = ConnectionStatus.Offline
+            }
+        }
+        val request = android.net.NetworkRequest.Builder()
+            .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+            .build()
+        connectivityManager.registerNetworkCallback(request, callback)
+
         viewModelScope.launch {
             _pendingCount.value = repo.pendingCount()
         }

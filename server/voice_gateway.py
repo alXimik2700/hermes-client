@@ -303,6 +303,7 @@ async def _authenticate_ws(websocket: WebSocket, token: str = Query(None)):
 @app.websocket("/api/messages/stream")
 @app.websocket("/messages/stream")
 @app.websocket("/stream")
+@app.websocket("/")
 async def message_stream(websocket: WebSocket, token: str = Query(None)):
     if not await _authenticate_ws(websocket, token):
         return
@@ -343,7 +344,6 @@ async def message_stream(websocket: WebSocket, token: str = Query(None)):
 
 @app.websocket("/api/voice-stream")
 @app.websocket("/api/voice-stream/")
-@app.websocket("/")
 async def voice_stream(websocket: WebSocket, token: str = Query(None)):
     if not await _authenticate_ws(websocket, token):
         return
