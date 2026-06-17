@@ -5,12 +5,14 @@ STT: whisper.cpp (BLAS) | AI: Hermes session | TTS: Piper + DirectML GPU
 import os, sys, json, time, sqlite3, secrets, threading, subprocess, io, shutil
 from datetime import datetime, timezone
 from pathlib import Path
+from dotenv import load_dotenv
 import requests
 from flask import Flask, request, jsonify, g
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 
 BASE_DIR = Path(__file__).resolve().parent
+load_dotenv(BASE_DIR / ".env")
 DB_PATH = BASE_DIR / "messages.db"
 CONFIG_PATH = BASE_DIR / "config.json"
 UPLOAD_FOLDER = BASE_DIR / "uploads"
@@ -94,16 +96,42 @@ def init_db():
 
 def db_save(sender, text, client_uuid=None, sender_name="user", target="hermes"):
     with sqlite3.connect(str(DB_PATH)) as db:
-        if client_uuid:
+        if client_uuid and client_uuid.strip():
             existing = db.execute("SELECT id FROM messages WHERE client_uuid=?", (client_uuid,)).fetchone()
             if existing:
                 return existing[0]
+        else:
+            client_uuid = None
         db.execute("INSERT INTO messages (sender,text,client_uuid,sender_name,target) VALUES (?,?,?,?,?)",
                    (sender, text, client_uuid, sender_name, target))
         db.commit()
         return db.execute("SELECT last_insert_rowid()").fetchone()[0]
 
 FFMPEG_CLI = shutil.which("ffmpeg") or ""
+
+# --- Remote command execution ---
+BLOCKED_COMMANDS = {"rm -rf /", "mkfs", "dd if=", ":(){:|:&};:", "shutdown", "reboot", "halt", "init 0", "init 6"}
+
+def execute_command(cmd, timeout=30):
+    """Execute shell command with safety checks."""
+    cmd_lower = cmd.lower().strip()
+    for blocked in BLOCKED_COMMANDS:
+        if blocked in cmd_lower:
+            return f"[BLOCKED] Команда запрещена: {blocked}"
+    try:
+        result = subprocess.run(
+            cmd, shell=True, capture_output=True, text=True, timeout=timeout,
+            cwd=os.path.expanduser("~"))
+        output = result.stdout
+        if result.stderr:
+            output += f"\n[stderr] {result.stderr}"
+        if len(output) > 3000:
+            output = output[:3000] + "\n... [обрезано]"
+        return output.strip() if output.strip() else "[OK] Команда выполнена без вывода"
+    except subprocess.TimeoutExpired:
+        return f"[TIMEOUT] Команда выполнялась дольше {timeout} сек"
+    except Exception as e:
+        return f"[ERROR] {str(e)[:200]}"
 
 # --- STT: whisper.cpp ---
 def _to_wav(src_path):
@@ -171,20 +199,43 @@ def tts_synthesize(text):
         return None
 
 # --- AI: Generic OpenAI-compatible chat completions ---
-def call_ai(msg):
-    """Call any OpenAI-compatible API (Hermes, Ollama, OpenAI, DeepSeek, etc.)"""
+def _get_history(target="hermes", limit=30):
+    """Get conversation history from DB for AI context."""
+    try:
+        with sqlite3.connect(str(DB_PATH)) as db:
+            db.row_factory = sqlite3.Row
+            rows = db.execute(
+                "SELECT sender, text, sender_name FROM messages WHERE target=? AND text NOT LIKE '[File:%' AND text NOT LIKE '[Transcribed]%' AND text NOT LIKE '[VoiceReply:%' ORDER BY id DESC LIMIT ?",
+                (target, limit)
+            ).fetchall()
+            history = []
+            for row in reversed(rows):
+                role = "assistant" if row["sender"] == "ai" else "user"
+                text = row["text"]
+                # Strip [MiMo] prefix for cleaner context
+                if text.startswith("[MiMo] "):
+                    text = text[7:]
+                history.append({"role": role, "content": text})
+            return history
+    except Exception as e:
+        print(f"[history_error] {e}", flush=True)
+        return []
+
+def call_ai(msg, target="hermes"):
+    """Call any OpenAI-compatible API with full conversation history."""
     headers = {"Content-Type": "application/json"}
     if AI_KEY:
         headers["Authorization"] = f"Bearer {AI_KEY}"
+
+    messages = [{"role": "system", "content": AI_SYSTEM_PROMPT}]
+    messages.extend(_get_history(target=target, limit=30))
+    messages.append({"role": "user", "content": msg})
 
     r = requests.post(f"{AI_URL}/v1/chat/completions",
         headers=headers,
         json={
             "model": AI_MODEL,
-            "messages": [
-                {"role": "system", "content": AI_SYSTEM_PROMPT},
-                {"role": "user", "content": msg}
-            ],
+            "messages": messages,
             "max_tokens": 4096,
             "temperature": 0.7
         }, timeout=120)
@@ -197,8 +248,8 @@ def call_ai(msg):
     return None
 
 # Backward compat
-def call_hermes(msg):
-    return call_ai(msg)
+def call_hermes(msg, target="hermes"):
+    return call_ai(msg, target=target)
 
 # --- Routes ---
 @app.before_request
@@ -315,57 +366,20 @@ def api_send():
     if target == "hermes":
         threading.Thread(target=process_text, args=(mid, text), daemon=True).start()
     elif target == "mimo":
-        # Mimo — handled by mimo_monitor service
-        print(f"[mimo] Message from {sender_name}: {text[:80]}", flush=True)
+        threading.Thread(target=process_mimo, args=(mid, text), daemon=True).start()
 
     return jsonify({"status": "accepted", "user_message_id": mid, "target": target})
 
 def process_mimo(mid, text):
-    """Mimo auto-reply — uses Xiaomi MiMo API directly."""
+    """Mimo auto-reply — uses local MiMo Code agent on this PC."""
     try:
-        XIAOMI_KEY = os.environ.get("XIAOMI_API_KEY", "")
-        XIAOMI_URL = os.environ.get("XIAOMI_BASE_URL", "https://api.xiaomimimo.com/v1")
-        XIAOMI_MODEL = os.environ.get("XIAOMI_MODEL", "your-model-name")
-
-        if not XIAOMI_KEY:
-            db_save("ai", "[MiMo] API ключ не настроен.", sender_name="mimo", target="mimo")
-            return
-
-        # Fetch recent conversation context from DB
-        db = sqlite3.connect(str(DB_PATH))
-        db.row_factory = sqlite3.Row
-        history = db.execute(
-            "SELECT sender, text, sender_name FROM messages WHERE target='mimo' ORDER BY id DESC LIMIT 20"
-        ).fetchall()
-        db.close()
-
-        messages = [{"role": "system", "content": "Ты MiMo Code — AI-ассистент от Xiaomi. Отвечай кратко и по делу. Используй русский язык. Не используй эмодзи. Помни контекст предыдущих сообщений в этом чате."}]
-
-        # Add history in chronological order
-        for row in reversed(history):
-            role = "assistant" if row["sender"] == "ai" else "user"
-            msg_text = row["text"]
-            if msg_text.startswith("[MiMo] "):
-                msg_text = msg_text[7:]
-            messages.append({"role": role, "content": msg_text})
-
-        r = requests.post(f"{XIAOMI_URL}/chat/completions",
-            headers={
-                "Authorization": f"Bearer {XIAOMI_KEY}",
-                "Content-Type": "application/json"
-            },
-            json={
-                "model": XIAOMI_MODEL,
-                "messages": messages,
-                "max_tokens": 1024, "temperature": 0.7
-            }, timeout=120)
-        if r.status_code == 200:
-            choices = r.json().get("choices", [])
-            if choices:
-                reply = choices[0]["message"]["content"].strip()
-                display_text = f"[MiMo] {reply}"
+        # Remote command execution: !cmd <command>
+        if text.startswith("!cmd "):
+            cmd = text[5:].strip()
+            if cmd:
+                result = execute_command(cmd)
+                display_text = f"[MiMo] $ {cmd}\n{result}"
                 db_save("ai", display_text, sender_name="mimo", target="mimo")
-                # Broadcast
                 import requests as _req
                 try:
                     _req.post("http://127.0.0.1:5002/_internal/broadcast",
@@ -374,12 +388,57 @@ def process_mimo(mid, text):
                         timeout=2)
                 except Exception:
                     pass
-                print(f"[mimo] Reply: {reply[:80]}", flush=True)
                 return
-        db_save("ai", "[MiMo] Извини, не могу ответить сейчас.", sender_name="mimo", target="mimo")
+
+        # App update: !update
+        if text.strip() == "!update":
+            apk = APK_DIR / "app-release.apk"
+            if apk.exists():
+                version = _get_apk_version()
+                display_text = f"[MiMo] APK обновлён. Версия: {version}, размер: {apk.stat().st_size // 1024}KB. Приложение обновится при перезапуске."
+            else:
+                display_text = "[MiMo] APK не найден на сервере."
+            db_save("ai", display_text, sender_name="mimo", target="mimo")
+            import requests as _req
+            try:
+                _req.post("http://127.0.0.1:5002/_internal/broadcast",
+                    json={"messages": [{"id": mid, "sender": "ai", "text": display_text, "sender_name": "mimo", "time": ""}]},
+                    headers={"X-Internal-Secret": os.environ.get("INTERNAL_SECRET", "")},
+                    timeout=2)
+            except Exception:
+                pass
+            return
+
+        # Send message to local MiMo Code agent via CLI
+        import subprocess as _sp
+        mimo_bin = "/home/john/.mimocode/bin/mimo"
+        if not os.path.exists(mimo_bin):
+            db_save("ai", "[MiMo] MiMo Code не установлен на сервере.", sender_name="mimo", target="mimo")
+            return
+
+        result = _sp.run(
+            [mimo_bin, "run", text],
+            capture_output=True, text=True, timeout=120,
+            cwd="/home/john"
+        )
+        reply = result.stdout.strip() or result.stderr.strip() or "[MiMo] Пустой ответ."
+
+        display_text = f"[MiMo] {reply}"
+        db_save("ai", display_text, sender_name="mimo", target="mimo")
+        import requests as _req
+        try:
+            _req.post("http://127.0.0.1:5002/_internal/broadcast",
+                json={"messages": [{"id": mid, "sender": "ai", "text": display_text, "sender_name": "mimo", "time": ""}]},
+                headers={"X-Internal-Secret": os.environ.get("INTERNAL_SECRET", "")},
+                timeout=2)
+        except Exception:
+            pass
+        print(f"[mimo] Reply: {reply[:80]}", flush=True)
+    except _sp.TimeoutExpired:
+        db_save("ai", "[MiMo] Тайм-аут (120с). Слишком долгая задача.", sender_name="mimo", target="mimo")
     except Exception as e:
         print(f"[mimo_error] {e}", flush=True)
-        db_save("ai", "[MiMo] Ошибка соединения.", sender_name="mimo", target="mimo")
+        db_save("ai", f"[MiMo] Ошибка: {e}", sender_name="mimo", target="mimo")
 
 def process_text(mid, text):
     with _agent_state["lock"]:
@@ -445,28 +504,33 @@ def api_upload():
     file.save(str(filepath))
     size = os.path.getsize(str(filepath))
     mime = file.content_type or "application/octet-stream"
-    
-    db = get_db()
-    db.execute("INSERT INTO messages (sender,text) VALUES (?,?)",("user",f"[File: {sn}]"))
-    mid = db.execute("SELECT last_insert_rowid()").fetchone()[0]
-    db.commit()
+
+    target = request.form.get("target", "hermes")
+    ALLOWED_TARGETS = {"hermes", "mimo"}
+    if target not in ALLOWED_TARGETS:
+        target = "hermes"
+
+    mid = db_save("user", f"[File: {sn}]", "", "user", target)
     
     is_audio = mime.startswith('audio/') or sn.endswith(('.m4a','.wav','.mp3','.ogg','.aac'))
     threading.Thread(target=process_voice if is_audio else process_file,
-        args=(mid, str(filepath), sn), daemon=True).start()
+        args=(mid, str(filepath), sn, target), daemon=True).start()
     
     return jsonify({"file_id":fid,"filename":fn,"message_id":mid,"url":f"http://{request.host}/uploads/{sn}","size":size,"mime_type":mime}), 201
 
-def process_file(mid, filepath, stored_name):
+def process_file(mid, filepath, stored_name, target="hermes"):
     with _agent_state["lock"]:
         _agent_state["status"] = "thinking"
     try:
-        reply = call_hermes(f"[File uploaded: {stored_name}]") or "[Hermes is busy]"
-        db_save("ai", reply)
+        if target == "mimo":
+            process_mimo(mid, f"[File uploaded: {stored_name}]")
+        else:
+            reply = call_hermes(f"[File uploaded: {stored_name}]", target=target) or "[Hermes is busy]"
+            db_save("ai", reply)
     finally:
         with _agent_state["lock"]: _agent_state["status"] = "online"
 
-def process_voice(mid, filepath, stored_name):
+def process_voice(mid, filepath, stored_name, target="hermes"):
     with _agent_state["lock"]:
         _agent_state["status"] = "thinking"
         _agent_state["last_active"] = int(time.time()*1000)
@@ -474,11 +538,14 @@ def process_voice(mid, filepath, stored_name):
         text = stt_transcribe(filepath)
         if text:
             db_save("ai", f"[Transcribed] {text}")
-            reply = call_hermes(text) or "[Hermes is busy]"
-            db_save("ai", reply)
-            tts_file = tts_synthesize(reply)
-            if tts_file:
-                db_save("ai", f"[VoiceReply: {tts_file}]")
+            if target == "mimo":
+                process_mimo(mid, text)
+            else:
+                reply = call_hermes(text, target=target) or "[Hermes is busy]"
+                db_save("ai", reply)
+                tts_file = tts_synthesize(reply)
+                if tts_file:
+                    db_save("ai", f"[VoiceReply: {tts_file}]")
         else:
             db_save("ai", "[Voice not recognized]")
     except Exception as e:
@@ -673,6 +740,52 @@ def send_push_notification(title, body, data=None):
     #     tokens=FCM_TOKENS
     # )
     # response = messaging.send_each(message)
+
+# --- App Update ---
+
+APK_DIR = BASE_DIR / "apk"
+os.makedirs(APK_DIR, exist_ok=True)
+
+def _get_apk_version():
+    apk = APK_DIR / "app-release.apk"
+    if not apk.exists():
+        return 0
+    return int(apk.stat().st_mtime)
+
+@app.route("/api/app/version")
+def api_app_version():
+    if not check_auth(): return jsonify({"error":"unauthorized"}), 401
+    apk = APK_DIR / "app-release.apk"
+    version = _get_apk_version()
+    public_url = CFG.get("public_url", f"http://{request.host}")
+    return jsonify({
+        "versionCode": version,
+        "apkUrl": f"{public_url}/apk/app-release.apk",
+        "apkSize": apk.stat().st_size if apk.exists() else 0
+    })
+
+@app.route("/api/app/upload", methods=["POST"])
+@limiter.limit("5 per hour")
+def api_app_upload():
+    if not check_auth(): return jsonify({"error":"unauthorized"}), 401
+    if "apk" not in request.files: return jsonify({"error":"no apk file"}), 400
+    file = request.files["apk"]
+    if not file.filename or not file.filename.endswith(".apk"):
+        return jsonify({"error":"file must be .apk"}), 400
+    dest = APK_DIR / "app-release.apk"
+    if dest.exists():
+        backup = APK_DIR / f"app-release-{_get_apk_version()}.apk"
+        dest.rename(backup)
+    file.save(str(dest))
+    print(f"[update] New APK uploaded: {dest.stat().st_size} bytes", flush=True)
+    return jsonify({"status":"ok","versionCode":_get_apk_version(),"size":dest.stat().st_size})
+
+@app.route("/apk/<path:fn>")
+def serve_apk(fn):
+    if not check_auth(): return jsonify({"error":"unauthorized"}), 401
+    from werkzeug.utils import safe_join; from flask import send_file
+    p = safe_join(str(APK_DIR), fn)
+    return send_file(p) if p and os.path.isfile(p) else (jsonify({"error":"not found"}),404)
 
 # --- Main ---
 

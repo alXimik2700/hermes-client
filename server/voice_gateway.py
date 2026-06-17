@@ -200,19 +200,42 @@ def piper_tts(text: str) -> bytes | None:
 
 # --- AI: Generic OpenAI-compatible chat completions ---
 
-def call_ai(msg: str) -> str | None:
-    """Call any OpenAI-compatible API (Hermes, Ollama, OpenAI, DeepSeek, etc.)"""
+def _get_history(target="hermes", limit=30):
+    """Get conversation history from DB for AI context."""
+    try:
+        with sqlite3.connect(str(DB_PATH)) as db:
+            db.row_factory = sqlite3.Row
+            rows = db.execute(
+                "SELECT sender, text FROM messages WHERE target=? AND text NOT LIKE '[File:%' AND text NOT LIKE '[Transcribed]%' AND text NOT LIKE '[VoiceReply:%' ORDER BY id DESC LIMIT ?",
+                (target, limit)
+            ).fetchall()
+            history = []
+            for row in reversed(rows):
+                role = "assistant" if row["sender"] == "ai" else "user"
+                text = row["text"]
+                if text.startswith("[MiMo] "):
+                    text = text[7:]
+                history.append({"role": role, "content": text})
+            return history
+    except Exception as e:
+        print(f"[history_error] {e}", flush=True)
+        return []
+
+def call_ai(msg: str, target: str = "hermes") -> str | None:
+    """Call any OpenAI-compatible API with full conversation history."""
     try:
         headers = {"Content-Type": "application/json"}
         if AI_KEY:
             headers["Authorization"] = f"Bearer {AI_KEY}"
+
+        messages = [{"role": "system", "content": AI_SYSTEM_PROMPT}]
+        messages.extend(_get_history(target=target, limit=30))
+        messages.append({"role": "user", "content": msg})
+
         r = requests.post(f"{AI_URL}/v1/chat/completions",
             headers=headers,
             json={"model": AI_MODEL,
-                  "messages": [
-                      {"role": "system", "content": AI_SYSTEM_PROMPT},
-                      {"role": "user", "content": msg}
-                  ],
+                  "messages": messages,
                   "max_tokens": 4096, "temperature": 0.7},
             timeout=120)
         if r.status_code == 200:
@@ -226,8 +249,8 @@ def call_ai(msg: str) -> str | None:
         return None
 
 # Backward compat
-def call_hermes(msg: str) -> str | None:
-    return call_ai(msg)
+def call_hermes(msg: str, target: str = "hermes") -> str | None:
+    return call_ai(msg, target=target)
 
 # --- Voice pipeline ---
 
