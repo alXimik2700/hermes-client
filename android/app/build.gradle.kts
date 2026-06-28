@@ -39,13 +39,18 @@ android {
 
     signingConfigs {
         create("release") {
-            // Load from local.properties or use debug keystore
             val keystorePath = rootProject.file("release.keystore")
             if (keystorePath.exists()) {
                 storeFile = keystorePath
-                storePassword = System.getenv("KEYSTORE_PASSWORD") ?: ""
-                keyAlias = System.getenv("KEY_ALIAS") ?: "release"
-                keyPassword = System.getenv("KEY_PASSWORD") ?: ""
+                val passwordFile = rootProject.file(".keystore_password")
+                val password = if (passwordFile.exists()) {
+                    passwordFile.readText().trim()
+                } else {
+                    System.getenv("KEYSTORE_PASSWORD") ?: ""
+                }
+                storePassword = password
+                keyAlias = "hermes_release"
+                keyPassword = password
             }
         }
     }
@@ -53,8 +58,9 @@ android {
     buildTypes {
         debug { isDebuggable = true }
         release {
+            val isCI = System.getenv("CI") == "true"
             isMinifyEnabled = true
-            isShrinkResources = true
+            isShrinkResources = !isCI
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
