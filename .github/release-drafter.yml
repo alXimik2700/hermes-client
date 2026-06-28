@@ -1,0 +1,50 @@
+name-template: 'v$RESOLVED_VERSION'
+tag-template: 'v$RESOLVED_VERSION'
+
+categories:
+  - title: '🚀 Новые возможности'
+    labels:
+      - 'feature'
+      - 'feat'
+  - title: '🐛 Исправления ошибок'
+    labels:
+      - 'bug'
+      - 'fix'
+  - title: '📝 Документация'
+    labels:
+      - 'documentation'
+      - 'docs'
+  - title: '⚡ Оптимизация'
+    labels:
+      - 'performance'
+      - 'perf'
+
+exclude-labels:
+  - 'chore'
+  - 'style'
+  - 'refactor'
+  - 'ci'
+  - 'test'
+
+template: |
+  ## Что нового
+
+  $CHANGES
+
+version-resolver:
+  major:
+    labels:
+      - 'major'
+  minor:
+    labels:
+      - 'minor'
+      - 'feat'
+      - 'feature'
+  patch:
+    labels:
+      - 'patch'
+      - 'fix'
+      - 'bug'
+      - 'docs'
+      - 'perf'
+  default: patch

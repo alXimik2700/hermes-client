@@ -2,7 +2,14 @@ name: Release
 
 on:
   push:
+    branches: [master]
     tags: ['v*']
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: write
+  pull-requests: read
 
 jobs:
   build:
@@ -20,6 +27,7 @@ jobs:
         uses: android-actions/setup-android@v3
 
       - name: Decode keystore
+        if: github.ref_type == 'tag'
         run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > android/release.keystore
 
       - name: Create local.properties
@@ -28,6 +36,7 @@ jobs:
           echo "sdk.dir=$ANDROID_HOME" > local.properties
 
       - name: Build release APK
+        if: github.ref_type == 'tag'
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
         run: |
@@ -35,27 +44,59 @@ jobs:
           chmod +x gradlew
           ./gradlew assembleHermesRelease
 
+      - name: Build debug APK
+        if: github.ref_type != 'tag'
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleHermesDebug
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hermes-apk
+          path: |
+            android/app/build/outputs/apk/hermes/release/*.apk
+            android/app/build/outputs/apk/hermes/debug/*.apk
+
+  release:
+    needs: build
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download APK artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: hermes-apk
+          path: ./apk
+
       - name: Get version
         id: version
         run: |
           VERSION=$(grep 'versionName' android/app/build.gradle.kts | head -1 | sed 's/.*"\(.*\)".*/\1/')
           echo "version=$VERSION" >> $GITHUB_OUTPUT
 
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
+      - name: Create/Update Release Draft
+        uses: release-drafter/release-drafter@v6
         with:
-          tag_name: ${{ github.ref_name }}
-          name: v${{ steps.version.outputs.version }}
-          body: |
-            ## Hermes Messenger v${{ steps.version.outputs.version }}
-
+          tag: ${{ github.ref_name }}
+          name: 'Hermes Messenger v${{ steps.version.outputs.version }}'
+          header: |
             ### Установка
-            1. Скачайте `hermes-release.apk`
+            1. Скачайте `hermes-release.apk` ниже
             2. В настройках Android разрешите установку из неизвестных источников
             3. Установите APK
 
             ### Серверная часть
-            Инструкция по развертыванию: [docs/API.md](https://github.com/alXimik2700/hermes-client/blob/master/docs/API.md)
-          files: android/app/build/outputs/apk/hermes/release/*.apk
-          draft: false
-          prerelease: false
+            Инструкция: [docs/API.md](https://github.com/alXimik2700/hermes-client/blob/master/docs/API.md)
+          append: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Attach APK to Release
+        run: |
+          gh release upload ${{ github.ref_name }} ./apk/*.apk --clobber
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
