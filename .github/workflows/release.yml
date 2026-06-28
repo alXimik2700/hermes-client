@@ -41,19 +41,15 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
         run: |
           cd android
-          echo "org.gradle.jvmargs=-Xmx5g -XX:MaxMetaspaceSize=512m -Dfile.encoding=UTF-8" > gradle.properties.tmp
-          grep -v "org.gradle.jvmargs" gradle.properties >> gradle.properties.tmp
-          mv gradle.properties.tmp gradle.properties
+          printf 'org.gradle.jvmargs=-Xmx5g -XX:MaxMetaspaceSize=512m -Dfile.encoding=UTF-8\norg.gradle.daemon=false\norg.gradle.workers.max=2\nandroid.useAndroidX=true\nkotlin.code.style=official\nandroid.nonTransitiveRClass=true\nandroid.suppressUnsupportedCompileSdk=36\n' > gradle.properties
           chmod +x gradlew
-          ./gradlew assembleHermesRelease --no-daemon
+          ./gradlew assembleHermesRelease --no-daemon --no-build-cache
 
       - name: Build debug APK
         if: github.ref_type != 'tag'
         run: |
           cd android
-          echo "org.gradle.jvmargs=-Xmx5g -XX:MaxMetaspaceSize=512m -Dfile.encoding=UTF-8" > gradle.properties.tmp
-          grep -v "org.gradle.jvmargs" gradle.properties >> gradle.properties.tmp
-          mv gradle.properties.tmp gradle.properties
+          printf 'org.gradle.jvmargs=-Xmx5g -XX:MaxMetaspaceSize=512m -Dfile.encoding=UTF-8\norg.gradle.daemon=false\norg.gradle.workers.max=2\nandroid.useAndroidX=true\nkotlin.code.style=official\nandroid.nonTransitiveRClass=true\nandroid.suppressUnsupportedCompileSdk=36\n' > gradle.properties
           chmod +x gradlew
           ./gradlew assembleHermesDebug --no-daemon
 
