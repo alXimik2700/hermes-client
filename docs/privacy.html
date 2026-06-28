@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Privacy Policy — Hermes Messenger</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            line-height: 1.7;
+            color: #1a1a2e;
+            background: #f8f9fa;
+        }
+        .container {
+            max-width: 760px;
+            margin: 0 auto;
+            padding: 40px 24px;
+        }
+        h1 {
+            font-size: 28px;
+            font-weight: 700;
+            margin-bottom: 8px;
+            color: #0f0f23;
+        }
+        .meta {
+            color: #6c757d;
+            font-size: 14px;
+            margin-bottom: 32px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid #dee2e6;
+        }
+        h2 {
+            font-size: 20px;
+            font-weight: 600;
+            margin-top: 32px;
+            margin-bottom: 12px;
+            color: #16213e;
+        }
+        h3 {
+            font-size: 16px;
+            font-weight: 600;
+            margin-top: 20px;
+            margin-bottom: 8px;
+            color: #1a1a2e;
+        }
+        p { margin-bottom: 12px; }
+        ul, ol {
+            margin-bottom: 12px;
+            padding-left: 24px;
+        }
+        li { margin-bottom: 6px; }
+        strong { font-weight: 600; }
+        code {
+            background: #e9ecef;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 14px;
+        }
+        .highlight {
+            background: #e8f5e9;
+            border-left: 4px solid #4caf50;
+            padding: 12px 16px;
+            margin: 16px 0;
+            border-radius: 0 4px 4px 0;
+        }
+        .section-number {
+            color: #6c757d;
+            font-weight: 400;
+        }
+        a { color: #1976d2; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+        footer {
+            margin-top: 48px;
+            padding-top: 16px;
+            border-top: 1px solid #dee2e6;
+            color: #6c757d;
+            font-size: 13px;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+
+    <h1>Privacy Policy</h1>
+    <div class="meta">
+        <strong>Hermes Messenger</strong> &mdash; Effective Date: June 28, 2026 &bull; Last Updated: June 28, 2026
+    </div>
+
+    <p>Hermes Messenger ("Application") is an open-source messaging application. This Privacy Policy describes how the Application handles data when you use it.</p>
+
+    <h2><span class="section-number">1.</span> Data Collection</h2>
+    <p>The Application collects only the data strictly necessary for its functionality:</p>
+
+    <h3>1.1 Data You Provide</h3>
+    <ul>
+        <li><strong>Text messages</strong> &mdash; stored locally on your device and transmitted to your self-hosted server</li>
+        <li><strong>Voice messages</strong> &mdash; recorded via microphone, processed for speech-to-text, transmitted to your server</li>
+        <li><strong>Files and images</strong> &mdash; selected by you for sharing, transmitted to your server</li>
+        <li><strong>Profile information</strong> &mdash; display name and avatar, stored locally on your device</li>
+    </ul>
+
+    <h3>1.2 Data Collected Automatically</h3>
+    <ul>
+        <li><strong>Network state</strong> &mdash; checked to determine connectivity for reliable message delivery</li>
+        <li><strong>Device identifiers</strong> &mdash; a unique client ID generated locally for session management (not transmitted to third parties)</li>
+    </ul>
+
+    <h3>1.3 Camera Access</h3>
+    <ul>
+        <li>Used exclusively for QR code scanning during device setup</li>
+        <li>Camera data is processed on-device only (Google ML Kit) and is never stored or transmitted externally</li>
+    </ul>
+
+    <div class="highlight">
+        <strong>The Application does NOT collect:</strong> location data, contacts, call logs, installed apps, browsing history, advertising identifiers, or any analytics data.
+    </div>
+
+    <h2><span class="section-number">2.</span> Data Storage</h2>
+    <ul>
+        <li>All messages are stored in an <strong>encrypted local database</strong> (SQLite) on your device</li>
+        <li>API credentials are stored in <strong>Android Keystore</strong> via EncryptedSharedPreferences (AES-256-GCM encryption)</li>
+        <li>No data is stored on third-party servers or cloud services</li>
+        <li>Everything stays on <strong>your device</strong> and <strong>your self-hosted server</strong></li>
+    </ul>
+
+    <h2><span class="section-number">3.</span> Data Transmission</h2>
+    <ul>
+        <li>All communication occurs exclusively between <strong>your device</strong> and <strong>your self-hosted server</strong></li>
+        <li>The Application connects only to the server URL you configured during setup</li>
+        <li>All data in transit is encrypted via <strong>HTTPS/TLS 1.2+</strong></li>
+        <li>No data passes through third-party servers, CDNs, or analytics services</li>
+    </ul>
+
+    <h2><span class="section-number">4.</span> Data Sharing</h2>
+    <div class="highlight">
+        The Application does <strong>NOT</strong> share, sell, or transmit your data to:
+        <ul>
+            <li>Third-party analytics services</li>
+            <li>Advertising networks</li>
+            <li>Data brokers</li>
+            <li>Social media platforms</li>
+            <li>AI training services</li>
+        </ul>
+        The Application contains <strong>zero</strong> third-party analytics, advertising, or tracking SDKs.
+    </div>
+
+    <h2><span class="section-number">5.</span> Data Retention</h2>
+    <ul>
+        <li><strong>Messages</strong> are retained on your device until you delete them</li>
+        <li><strong>Voice messages</strong> are processed in real-time and not stored permanently on the server</li>
+        <li><strong>Local cache</strong> is cleared when you clear the Application's storage in device settings</li>
+        <li><strong>No automatic data expiration</strong> &mdash; you control your data lifecycle</li>
+    </ul>
+
+    <h2><span class="section-number">6.</span> Your Rights</h2>
+    <p>You have the right to:</p>
+    <ul>
+        <li><strong>Access</strong> &mdash; view all data stored locally by the Application</li>
+        <li><strong>Delete</strong> &mdash; clear all local data via Application settings or device settings</li>
+        <li><strong>Export</strong> &mdash; messages can be exported from your server</li>
+        <li><strong>Revoke permissions</strong> &mdash; camera, microphone, and storage permissions can be revoked at any time in device settings</li>
+    </ul>
+
+    <h2><span class="section-number">7.</span> Children's Privacy</h2>
+    <p>The Application is not directed at children under 13 years of age. We do not knowingly collect data from children.</p>
+
+    <h2><span class="section-number">8.</span> Security</h2>
+    <ul>
+        <li><strong>Encryption at rest</strong> &mdash; local database encrypted via Android Keystore (AES-256-GCM)</li>
+        <li><strong>Encryption in transit</strong> &mdash; all network communication via TLS 1.2+</li>
+        <li><strong>Open-source</strong> &mdash; full source code available for independent security audits</li>
+        <li><strong>No telemetry</strong> &mdash; no usage data is collected or transmitted</li>
+    </ul>
+
+    <h2><span class="section-number">9.</span> Changes to This Policy</h2>
+    <p>We may update this Privacy Policy from time to time. Changes will be posted in the Application and on the <a href="https://github.com/hermes-messenger/hermes-client">GitHub repository</a>. Continued use of the Application after changes constitutes acceptance of the updated policy.</p>
+
+    <h2><span class="section-number">10.</span> Contact</h2>
+    <p>For questions about this Privacy Policy:</p>
+    <ul>
+        <li>GitHub Issues: <a href="https://github.com/hermes-messenger/hermes-client/issues">https://github.com/hermes-messenger/hermes-client/issues</a></li>
+    </ul>
+
+    <h2><span class="section-number">11.</span> Open Source</h2>
+    <p>Hermes Messenger is open-source software licensed under the MIT License. The full source code is available at <a href="https://github.com/hermes-messenger/hermes-client">https://github.com/hermes-messenger/hermes-client</a>, allowing independent verification of all data handling practices described in this policy.</p>
+
+    <footer>
+        Hermes Messenger &copy; 2026 &bull; <a href="https://github.com/hermes-messenger/hermes-client">Source Code</a>
+    </footer>
+
+</div>
+</body>
+</html>
