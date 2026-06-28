@@ -41,15 +41,15 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
         run: |
           cd android
+          sed -i 's/org.gradle.jvmargs=.*/org.gradle.jvmargs=-Xmx6g -Dfile.encoding=UTF-8/' gradle.properties
           chmod +x gradlew
-          ./gradlew assembleHermesRelease --no-daemon -Dorg.gradle.jvmargs="-Xmx6g"
+          ./gradlew assembleHermesRelease --no-daemon
 
       - name: Build debug APK
         if: github.ref_type != 'tag'
-        env:
-          GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4g -Dfile.encoding=UTF-8"
         run: |
           cd android
+          sed -i 's/org.gradle.jvmargs=.*/org.gradle.jvmargs=-Xmx6g -Dfile.encoding=UTF-8/' gradle.properties
           chmod +x gradlew
           ./gradlew assembleHermesDebug --no-daemon
 
