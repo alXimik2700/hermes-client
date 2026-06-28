@@ -39,17 +39,20 @@ jobs:
         if: github.ref_type == 'tag'
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4g -Dfile.encoding=UTF-8"
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew assembleHermesRelease
+          ./gradlew assembleHermesRelease --no-daemon
 
       - name: Build debug APK
         if: github.ref_type != 'tag'
+        env:
+          GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4g -Dfile.encoding=UTF-8"
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew assembleHermesDebug
+          ./gradlew assembleHermesDebug --no-daemon
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
