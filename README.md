@@ -1,12 +1,18 @@
 # Hermes Messenger
 
-Offline-first Android messenger with voice input/output, connecting to local AI servers via private tunnels. Built with AI agents, works without cloud services.
+[![CI](https://github.com/alXimik2700/hermes-client/actions/workflows/ci.yml/badge.svg)](https://github.com/alXimik2700/hermes-client/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/alXimik2700/hermes-client)](https://github.com/alXimik2700/hermes-client/releases)
+[![License](https://img.shields.io/github/license/alXimik2700/hermes-client)](LICENSE)
+[![Stars](https://img.shields.io/github/stars/alXimik2700/hermes-client)](https://github.com/alXimik2700/hermes-client/stargazers)
+
+Offline-first Android voice messenger client for **Local AI** (Ollama, DeepSeek, LM Studio) via **Tailscale** private tunnels. Self-hosted, no cloud, full privacy.
 
 ## What it is
 
-- **Android client** — Kotlin + Jetpack Compose, Room DB for offline storage, WebSocket for real-time sync
-- **Python server** — Flask REST API + FastAPI WebSocket for voice streaming, connects to any OpenAI-compatible AI
-- **Voice pipeline** — whisper.cpp (STT) + Piper (TTS), runs on your hardware
+- **Android client** — Kotlin + Jetpack Compose, Room DB, WebSocket real-time sync
+- **Python server** — Flask REST API + FastAPI WebSocket for voice streaming, connects to any OpenAI-compatible AI (Ollama, DeepSeek, LM Studio, vLLM)
+- **Voice pipeline** — Edge-TTS (Microsoft Neural Voices) + whisper.cpp (STT), runs on your hardware
+- **Knowledge graph** — LightRAG integration with local LLM for contextual AI memory
 - **Access from anywhere** — via Tailscale Funnel, no public server needed
 
 ## Quick start
