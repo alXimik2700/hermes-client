@@ -39,11 +39,10 @@ jobs:
         if: github.ref_type == 'tag'
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          GRADLE_OPTS: "-Dorg.gradle.jvmargs=-Xmx4g -Dfile.encoding=UTF-8"
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew assembleHermesRelease --no-daemon
+          ./gradlew assembleHermesRelease --no-daemon -Dorg.gradle.jvmargs="-Xmx6g"
 
       - name: Build debug APK
         if: github.ref_type != 'tag'
