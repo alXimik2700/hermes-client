@@ -99,6 +99,6 @@ jobs:
 
       - name: Attach APK to Release
         run: |
-          gh release upload ${{ github.ref_name }} ./apk/*.apk --clobber
+          find ./apk -name "*.apk" -exec gh release upload ${{ github.ref_name }} {} --clobber \;
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
