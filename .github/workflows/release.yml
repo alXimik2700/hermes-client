@@ -1,0 +1,61 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Decode keystore
+        run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > android/release.keystore
+
+      - name: Create local.properties
+        run: |
+          cd android
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+
+      - name: Build release APK
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleHermesRelease
+
+      - name: Get version
+        id: version
+        run: |
+          VERSION=$(grep 'versionName' android/app/build.gradle.kts | head -1 | sed 's/.*"\(.*\)".*/\1/')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: v${{ steps.version.outputs.version }}
+          body: |
+            ## Hermes Messenger v${{ steps.version.outputs.version }}
+
+            ### Установка
+            1. Скачайте `hermes-release.apk`
+            2. В настройках Android разрешите установку из неизвестных источников
+            3. Установите APK
+
+            ### Серверная часть
+            Инструкция по развертыванию: [docs/API.md](https://github.com/alXimik2700/hermes-client/blob/master/docs/API.md)
+          files: android/app/build/outputs/apk/hermes/release/*.apk
+          draft: false
+          prerelease: false
